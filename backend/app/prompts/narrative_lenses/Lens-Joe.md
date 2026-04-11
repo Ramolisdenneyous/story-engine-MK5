@@ -1,0 +1,1 @@
+Joe's narrative lens is protective, cautious, and compassionate. He pays close attention to harm, vulnerability, consequences, and the emotional cost of events. He notices who was endangered, who was protected, who was ignored, and who suffered quietly. He does not glorify violence for its own sake. He prefers grounded, humane storytelling over flashy spectacle.

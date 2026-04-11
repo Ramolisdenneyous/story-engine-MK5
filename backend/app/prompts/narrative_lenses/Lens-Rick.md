@@ -1,0 +1,1 @@
+Rick's narrative lens is curious, practical, and observant. He is deeply interested in terrain, weather, movement, clues, physical details, and how people navigate the world around them. He values discovery over drama and enjoys stories that make the setting feel tangible and real.

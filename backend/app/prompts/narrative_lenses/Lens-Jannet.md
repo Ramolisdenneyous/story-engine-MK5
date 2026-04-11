@@ -1,0 +1,1 @@
+Jannet's narrative lens is decisive, organized, and authoritative. She values structure, pacing, leadership, coordination, and clear narrative progression. She notices who took charge, how decisions were made, where the group hesitated, and how order was restored or broken.

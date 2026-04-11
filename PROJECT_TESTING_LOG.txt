@@ -1,0 +1,151 @@
+Story Engine MVP Project Log
+Date: 2026-02-28
+Location: C:\Users\Raymond\Desktop\Test File\hello.js\story-engine
+
+1. Initial Spec Intake
+- Read and reviewed `story-engine-prototype-SPEC (5).txt`.
+- Extracted Phase 1 MVP scope and Section 4 Technical Specifications.
+- Implemented against the stated architecture target: monorepo with `frontend`, `backend`, and `shared`.
+
+2. Initial MVP Build
+- Built FastAPI backend for session lifecycle, Tab1 save/lock, Tab2 prompting, summarization, End Chapter, Tab3 narrative agent save, narrative build, and reset.
+- Implemented append-only storage model for:
+  - Session
+  - Tab1Inputs
+  - Event
+  - MemoryBlock
+  - NarrativeDraft
+  - LLMArtifact
+- Added Postgres-oriented schema and migration file.
+- Built React + TypeScript frontend with three-tab workflow matching the MVP spec.
+- Added local Docker setup for frontend, backend, and Postgres.
+
+3. Initial Tests Added
+- Added minimal backend unit tests covering:
+  - `prompt_index` increment behavior
+  - summarization trigger at multiples of 7
+  - append-only `MemoryBlock` behavior
+  - session state transitions
+- Test suite passed locally after backend fixes.
+
+4. Early Backend Fixes
+- Fixed Pydantic settings/config compatibility by switching to `pydantic-settings`.
+- Fixed FastAPI response serialization for ORM-backed response models.
+- Cleaned test DB handling so test runs were stable on Windows.
+
+5. Docker Bring-Up and Validation
+- Confirmed Docker was initially unavailable in PATH and later available via full executable path.
+- Diagnosed Docker Desktop issues caused by missing WSL support.
+- After WSL installation and Docker recovery, validated compose build and startup.
+- Confirmed service reachability:
+  - frontend on `http://localhost:5173`
+  - backend on `http://localhost:8000/health`
+- Identified a backend startup race against Postgres readiness; restarting backend resolved it.
+
+6. Frontend Vite / PostCSS Fix
+- Investigated Vite overlay error: failed to load PostCSS config due to invalid JSON.
+- Found no intended PostCSS/Tailwind config in source, but corrected frontend config state by:
+  - rewriting `frontend/package.json` as plain ASCII to remove BOM issues
+  - adding `frontend/postcss.config.cjs` with `module.exports = { plugins: {} };`
+- Rebuilt frontend and verified the overlay issue was gone.
+
+7. OpenAI Provider Integration
+- Added environment-driven OpenAI provider support to replace the mock provider.
+- Backend now supports:
+  - `LLM_PROVIDER`
+  - `LLM_EXTERNAL_ENABLED`
+  - `OPENAI_API_KEY`
+  - `OPENAI_BASE_URL`
+  - model selection env vars for character, summary, and narrative calls
+- Updated compose config to read these environment variables.
+- Added `.env.example` to document required local configuration.
+
+8. API Key / Environment Troubleshooting
+- Diagnosed backend `500` failure on Tab1 lock as missing `OPENAI_API_KEY` inside the backend container.
+- Found that the user-created key file was named `key.env.txt`, which Docker Compose does not auto-load.
+- Copied the file to a proper `.env` in the project root.
+- Restarted backend and verified that OpenAI env vars were present in-container.
+- Confirmed Tab1 lock endpoint resumed working.
+
+9. UI Fixes Requested During Testing
+- Fixed Tab2 transcript rendering so:
+  - user prompts remain white
+  - agent replies render in their slot color
+- Fixed Tab3 readability by making Tab3 text output gray instead of black-on-dark.
+- Added visible selected-agent cue in Tab2 Cell 2 by styling the prompt form according to the active agent slot.
+- Restored missing Tab3 `Download Chapter` button.
+- Verified frontend rebuild and runtime health after these changes.
+
+10. Prompt Plumbing / Character Context Fix
+- User identified character fidelity and scene fidelity failures, especially around:
+  - gender drift
+  - scene/location confusion
+  - insufficient use of structured memory and recent transcript context
+- Reviewed character-agent call path and confirmed it was incomplete.
+- Reworked backend character prompt assembly to include, in order:
+  1. Agent Identity from Tab1
+  2. Structured Memory from Tab3
+  3. Recent Tab2 context
+  4. Current user prompt
+- Updated OpenAI character system prompt to enforce:
+  - identity fidelity
+  - structured memory authority
+  - recent scene accuracy
+  - no unsupported narration of other characters' internal states
+- Re-ran backend tests and rebuilt backend successfully.
+
+11. Runtime Status at End of Session
+- Docker stack is up and reachable.
+- Backend health endpoint returns OK.
+- Frontend is reachable and usable.
+- Downloaded narrative output from Tab3 confirmed that the full pipeline works end-to-end.
+- Remaining work is primarily quality tuning rather than infrastructure recovery.
+
+12. Files Added or Modified During This Work
+Backend:
+- `backend/app/config.py`
+- `backend/app/db.py`
+- `backend/app/llm.py`
+- `backend/app/main.py`
+- `backend/app/models.py`
+- `backend/app/schemas.py`
+- `backend/app/services.py`
+- `backend/app/__init__.py`
+- `backend/requirements.txt`
+- `backend/migrations/001_init.sql`
+- `backend/tests/test_mvp.py`
+- `backend/Dockerfile`
+
+Frontend:
+- `frontend/src/App.tsx`
+- `frontend/src/api.ts`
+- `frontend/src/main.tsx`
+- `frontend/src/styles.css`
+- `frontend/package.json`
+- `frontend/index.html`
+- `frontend/tsconfig.json`
+- `frontend/Dockerfile`
+- `frontend/postcss.config.cjs`
+
+Project root:
+- `docker-compose.yml`
+- `.gitignore`
+- `.env.example`
+- this log file
+
+13. Key Testing Outcomes
+- MVP API behavior matched required unit-test coverage.
+- Docker local development environment now works.
+- Frontend runtime errors caused by config issues were fixed.
+- Environment-variable loading for real API use was fixed.
+- UI issues reported during interactive testing were fixed.
+- Character-agent prompt construction now better matches the original spec's intended ordering.
+
+14. Notes for Next Work Session
+- Start new test sessions after prompt-assembly changes when evaluating fidelity.
+- Focus next on quality tuning rather than platform setup.
+- Best next targets:
+  - stricter character fidelity
+  - stricter summarizer anti-drift behavior
+  - tighter narrative style controls
+  - optional debug visibility into exact per-agent payloads

@@ -1,0 +1,81 @@
+﻿Added Features
+
+
+Tab1 Splash page display the following text, and locking the app from further use requiring the password to progress. The splash screen should appear when the application loads and block access to all tabs until the correct password is entered. After the correct password is submitted, the splash screen disappears and the user gains normal access to the three tabs for the remainder of the session.
+
+
+“Welcome to Story Engine MK2
+Story Engine MK2 is an experimental AI-powered tabletop adventure simulator. You act as the Game Master while a party of AI-controlled players explores, fights, and roleplays through a dynamic fantasy scenario. The interface is organized into three tabs that guide the flow of play.
+Tab 1 – Party Setup
+Start here. Choose the players who will make up the party, assign them character classes, and select the mission the group will attempt. Each player has a distinct personality and playstyle, so different combinations will produce different group dynamics. Once your party and scenario are selected, the adventure is ready to begin.
+Tab 2 – Live Adventure
+This is where the game actually happens. Enter prompts to describe situations, environments, or encounters. The AI players will react, make decisions, roll dice, and carry the story forward. Combat, exploration, and roleplay all take place here. You guide the world as the GM while the agents act as the party.
+Tab 3 – Story Chronicle
+When the session reaches a natural stopping point, generate a written narrative of the adventure. You can choose which player’s voice will tell the story, giving each chronicle a different tone and perspective. This tab compiles the events of the session into a cohesive narrative record.
+Quick Start
+1. Configure your party and mission in Tab 1.
+2. Move to Tab 2 and begin the adventure by describing the opening scene.
+3. When the session ends, visit Tab 3 to create the written chronicle.
+Experiment with different party combinations, missions, and GM prompts. The story engine will respond differently each time.
+Enter your Testing Password below:”
+
+
+At the bottom of the page is a cell for the user to enter the password and a single button, saying, “Enter” Incorrect password should display a simple error message and allow the user to try again.
+
+
+To start things out the testing password will simply be, “Rayis1cooldude”
+
+
+
+
+
+
+Next, When the user first navigates to Tab2 for a new session, the Context Transcript in Cell1 should automatically populate with the following opening narrative. When the adventure starts on Tab2 cell1 the Context Transcript should be auto populated with a starting prompt for the user and agents to read, “Welcome to Valaska, the bitter north at the very edge of the known world. Endless forests of black pine stretch beneath iron-gray skies, and the wind carries the bite of distant glaciers.
+
+
+Your party of four adventurers has gathered in the frontier town of Moosehearth, a stubborn settlement of timber lodges and smoking chimneys clinging to survival against the cold. Tonight you sit inside the Antlers' Rest Inn, a warm refuge of firelight, rough laughter, and the smell of spiced ale.
+
+
+Just moments ago, one of you returned from the town square carrying a freshly pulled notice from the jobs board. The parchment is still stiff from the cold, promising coin, danger, and opportunity somewhere out in the frozen wilds.
+
+
+Adventure calls.”
+
+
+
+
+ALSO, The player agents are just a little too verbose, let's update their agent prompts to try to tighten their response to two about paragraphs each rather than the three they normally write with. Update the player agent system prompts to encourage shorter responses. Each player reply should be approximately two paragraphs maximum rather than the current three-paragraph style.
+
+
+
+
+
+
+The third thing we need is to add the selected adventure’s three Completion Objectives to the GM notes in cell four, that way the user can track what the players need to do.  The objectives should be pulled from the selected adventure defined in Tab1.
+
+
+
+
+
+
+Next I have a series of UI changes I would like to make:
+
+
+
+
+Tab1 cell2 The adventure Titles are hard to  read and currently in black Text, please change those titles to White.
+
+
+Tab2 Cell1 the context transcript should be able to display twice as much text as it currently can.  I think the best option is to double the vertical length it occupies on the screen. Increase the vertical height of the Context Transcript (Tab2 Cell1) to approximately double its current height so it can display more conversation history without scrolling.
+
+
+The context transcript cell should always jump down to the newest output, that way the user is not having to constantly scroll down in it. The Context Transcript should automatically scroll to the newest message whenever new output is added.
+
+
+In Tab2 Cell3 (Player Status), the cell should span the full width of the screen. The four player portraits and status panels should appear in a single horizontal row from left to right so they are visible without significant scrolling.
+
+
+Tab2 Cell4, the GM notes should be at the bottom of the page under the Player Status Cell, note that this cell now has three pieces of information, the dice roller(already implemented), the short monster stats for the chosen adventure(already implemented), and now also the three Adventure Completion Objectives. 
+
+
+Reduce the size of Tab3 Cell2 to approximately half its current height. The four player narrator options should be displayed horizontally in a single row from left to right.

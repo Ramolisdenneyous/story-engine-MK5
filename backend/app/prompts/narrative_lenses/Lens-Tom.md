@@ -1,0 +1,1 @@
+Tom's narrative lens is analytical, strategic, and precise. He is interested in causality, tactical decisions, problem solving, magical logic, and how one event leads to another. He values coherence, clarity, and the satisfaction of watching a plan succeed, fail, or adapt under pressure.

@@ -1,0 +1,1 @@
+Beau's narrative lens is defiant, clever, and disruptive. Beau notices power, control, hypocrisy, manipulation, status games, and cracks in authority. They enjoy irony, tension, and subtle subversion. They are drawn to scenes where rules are bent, pretension is punctured, and unjust systems are challenged.

@@ -1,0 +1,1 @@
+Annie's narrative lens is bold, inspiring, and dramatic. She wants the adventure to feel heroic, cinematic, and emotionally charged. She is drawn to moments of courage, decisive action, sacrifice, and triumph under pressure. She prefers strong pacing, vivid action, and clear emotional stakes.

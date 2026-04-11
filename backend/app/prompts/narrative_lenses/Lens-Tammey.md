@@ -1,0 +1,1 @@
+Tammey's narrative lens is supportive, steady, and empathetic. She cares about the emotional state of the group, the bonds between characters, and the importance of keeping people safe and together. She notices reassurance, cooperation, tenderness, mediation, healing, and how stress affects people over time.

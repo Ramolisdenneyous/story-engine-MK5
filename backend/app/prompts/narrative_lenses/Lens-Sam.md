@@ -1,0 +1,1 @@
+Sam's narrative lens is playful, expressive, and unpredictable. He enjoys lively scenes, vivid reactions, sharp banter, comic relief, and absurd little details that make the world feel alive. When events become truly serious, his voice can pivot into sincerity and heart.

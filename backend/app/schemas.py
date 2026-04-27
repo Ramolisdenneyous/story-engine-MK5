@@ -126,6 +126,7 @@ class CombatStateOut(BaseModel):
 class OppositionMonsterInstanceOut(BaseModel):
     monster_id: str
     display_name: str
+    monster_type: str = ""
     current_hp: int
     hp_max: int
     is_dead: bool
@@ -151,6 +152,9 @@ class SessionSummary(BaseModel):
     combat_state: CombatStateOut
     selected_narrative_player_id: str
     opposition_state: OppositionStateOut | None = None
+    current_location_id: str = ""
+    current_location_name: str = ""
+    mission_objective_state: dict = Field(default_factory=dict)
 
 
 class PromptRequest(BaseModel):

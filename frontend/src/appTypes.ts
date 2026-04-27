@@ -80,10 +80,28 @@ export type CombatState = {
 export type OppositionMonsterInstance = {
   monster_id: string;
   display_name: string;
+  monster_type: string;
   current_hp: number;
   hp_max: number;
   is_dead: boolean;
   status_effects: string[];
+};
+
+export type MissionObjectiveState = {
+  adventure_id: string;
+  title: string;
+  public_goal: string;
+  progress_label: string;
+  status: string;
+  complete: boolean;
+  return_available: boolean;
+  allowed_location_ids?: string[];
+  visited_location_ids?: string[];
+  undead_kills?: number;
+  target_kills?: number;
+  gold_collected?: number;
+  target_gold?: number;
+  updates?: Array<{ prompt_index: number; text: string }>;
 };
 
 export type OppositionState = {
@@ -152,6 +170,9 @@ export type SessionDetail = {
     combat_state: CombatState;
     selected_narrative_player_id: string;
     opposition_state?: OppositionState | null;
+    current_location_id: string;
+    current_location_name: string;
+    mission_objective_state: MissionObjectiveState;
   };
   tab1: {
     preset_id: string;

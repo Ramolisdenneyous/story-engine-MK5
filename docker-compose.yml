@@ -33,8 +33,10 @@ services:
       context: ./frontend
       args:
         VITE_API_BASE: http://localhost:8002
+        VITE_TUTORIAL_VIDEO_URL: ${VITE_TUTORIAL_VIDEO_URL:-}
     environment:
       VITE_API_BASE: http://localhost:8002
+      VITE_TUTORIAL_VIDEO_URL: ${VITE_TUTORIAL_VIDEO_URL:-}
     ports:
       - "5175:5173"
     depends_on:

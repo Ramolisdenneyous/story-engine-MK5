@@ -40,6 +40,54 @@ OPPOSITION_DISPLAY_NAME = "Opposition"
 OPPOSITION_CLEANUP_DELAY_SECONDS = 5
 MONSTER_INSTANCE_LABELS = ["Monster-One", "Monster-Two", "Monster-Three", "Monster-Four"]
 logger = logging.getLogger(__name__)
+RETURN_TO_MOOSEHEARTH_TEXT = "The objective is complete. Return to Moosehearth to report your success."
+MISSION_OBJECTIVE_CONFIG = {
+    "icebane-castle": {
+        "title": "Recover the Witch-King Crown",
+        "public_goal": "Recover the Witch-King Crown from the ruins of Icebane Castle.",
+        "progress_label": "Witch-King Crown not yet recovered.",
+        "secret": "The crown drops only when the last monster in The Fractured Throne Room dies.",
+        "target_location_id": "loc-6",
+        "target_location_name": "The Fractured Throne Room",
+        "item_name": "Witch-King Crown",
+    },
+    "east-marsh-raid": {
+        "title": "Kill the Warchief",
+        "public_goal": "Find and defeat the East Marsh war leader.",
+        "progress_label": "The war leader is still at large.",
+        "secret": "Traveling to The War Leader's Tent triggers the warchief encounter.",
+        "target_location_id": "loc-5",
+        "target_location_name": "The War Leader's Tent",
+        "required_monsters": ["Bandit Captain", "Giant Boar"],
+    },
+    "telas-wagons": {
+        "title": "Escort the Wagon Train to Glockstead",
+        "public_goal": "Escort the supply wagons along the King's Way to Glockstead.",
+        "progress_label": "Wagons are waiting to depart.",
+        "travel_sequence": ["loc-1", "loc-2", "loc-3", "loc-4", "loc-5", "loc-6"],
+    },
+    "old-people-barrow": {
+        "title": "Recover the Lost Relic",
+        "public_goal": "Recover the lost relic from the Old-People's Barrow.",
+        "progress_label": "The lost relic has not been recovered.",
+        "secret": "A successful search check in The Burial Vault reveals The Befouled Urn.",
+        "target_location_id": "loc-5",
+        "target_location_name": "The Burial Vault",
+        "item_name": "The Befouled Urn",
+    },
+    "endless-glacier-undead": {
+        "title": "Kill 10 Undead",
+        "public_goal": "Destroy ten undead threats along the Endless Glacier.",
+        "progress_label": "Undead defeated: 0/10.",
+        "target_kills": 10,
+    },
+    "collecting-taxes": {
+        "title": "Collect 400gp",
+        "public_goal": "Collect 400 gold pieces along the King's Road.",
+        "progress_label": "Gold collected: 0/400gp.",
+        "target_gold": 400,
+    },
+}
 OPENING_TRANSCRIPT = (
     "Welcome to Valaska, the bitter north at the very edge of the known world. Endless forests of black pine stretch beneath "
     "iron-gray skies, and the wind carries the bite of distant glaciers.\n\n"
@@ -84,6 +132,97 @@ def _empty_opposition_state() -> dict:
         "instances": [],
         "cleanup_after": "",
     }
+
+
+def _empty_mission_objective_state(adventure_id: str = "") -> dict:
+    config = MISSION_OBJECTIVE_CONFIG.get(adventure_id, {})
+    state = {
+        "adventure_id": adventure_id,
+        "title": config.get("title", ""),
+        "public_goal": config.get("public_goal", ""),
+        "progress_label": config.get("progress_label", ""),
+        "status": "inactive" if not adventure_id else "in_progress",
+        "complete": False,
+        "return_available": False,
+        "updates": [],
+    }
+    if adventure_id == "telas-wagons":
+        state.update({"current_step": 0, "allowed_location_ids": ["loc-1"], "visited_location_ids": []})
+    elif adventure_id == "endless-glacier-undead":
+        state.update({"undead_kills": 0, "target_kills": 10})
+    elif adventure_id == "collecting-taxes":
+        state.update({"gold_collected": 0, "target_gold": 400})
+    elif adventure_id == "icebane-castle":
+        state.update({"item_awarded": False, "item_name": config.get("item_name", "")})
+    elif adventure_id == "old-people-barrow":
+        state.update({"item_awarded": False, "item_name": config.get("item_name", "")})
+    elif adventure_id == "east-marsh-raid":
+        state.update({"boss_encounter_spawned": False, "boss_encounter_group_id": "", "boss_defeated": False})
+    return state
+
+
+def _mission_state(session: SessionModel) -> dict:
+    tab1_adventure_id = ""
+    current_state = copy.deepcopy(session.mission_objective_state or {})
+    adventure_id = str(current_state.get("adventure_id", "") or tab1_adventure_id)
+    if not current_state or adventure_id not in MISSION_OBJECTIVE_CONFIG:
+        return current_state
+    return current_state
+
+
+def _mission_context_for_agents(session: SessionModel) -> dict:
+    state = copy.deepcopy(session.mission_objective_state or {})
+    adventure_id = str(state.get("adventure_id", "") or "")
+    config = MISSION_OBJECTIVE_CONFIG.get(adventure_id, {})
+    if not config:
+        return {}
+    context = {
+        "title": state.get("title", config.get("title", "")),
+        "goal": state.get("public_goal", config.get("public_goal", "")),
+        "progress": state.get("progress_label", config.get("progress_label", "")),
+        "complete": bool(state.get("complete", False)),
+        "current_location": session.current_location_name or "",
+    }
+    if adventure_id == "telas-wagons":
+        context["allowed_next_locations"] = state.get("allowed_location_ids", [])
+    return context
+
+
+def _set_mission_complete(db: Session, session: SessionModel, prompt_index: int, state: dict, note: str, payload: dict | None = None) -> dict:
+    if state.get("complete"):
+        return state
+    state["complete"] = True
+    state["status"] = "complete"
+    state["return_available"] = True
+    state["progress_label"] = note
+    state.setdefault("updates", []).append({"prompt_index": prompt_index, "text": note})
+    session.mission_objective_state = state
+    _append_system_event(
+        db,
+        session.session_id,
+        prompt_index,
+        EventKind.OBJECTIVE_UPDATED,
+        f"Objective complete: {note}",
+        {"objective_complete": True, **(payload or {})},
+    )
+    return state
+
+
+def _update_mission_progress(db: Session, session: SessionModel, prompt_index: int, note: str, payload: dict | None = None) -> None:
+    state = copy.deepcopy(session.mission_objective_state or {})
+    if not state:
+        return
+    state["progress_label"] = note
+    state.setdefault("updates", []).append({"prompt_index": prompt_index, "text": note})
+    session.mission_objective_state = state
+    _append_system_event(
+        db,
+        session.session_id,
+        prompt_index,
+        EventKind.OBJECTIVE_UPDATED,
+        f"Objective progress: {note}",
+        payload or {},
+    )
 
 
 def _monster_template(monster_type: str) -> dict:
@@ -485,6 +624,7 @@ def _build_character_payload(db: Session, session: SessionModel, agent_slot: int
             for event in recent_events
         ],
         "current_location": session.current_location_text,
+        "mission_objective": _mission_context_for_agents(session),
         "opposition_state": copy.deepcopy(session.opposition_state or _empty_opposition_state()),
         "mechanical_resolution_hint": _build_player_mechanical_hint(db, session, agent_slot, class_data, user_text),
         "user_prompt": user_text,
@@ -512,6 +652,9 @@ def _build_party_combat_state(db: Session, session: SessionModel) -> list[dict]:
                 "class_id": class_id,
                 "armor_class": class_data["armor_class"],
                 "hp_current": state.get("hp_current", class_data["hp_max"]),
+                # Keep both keys so downstream tool-resolution code can read a
+                # consistent `current_hp` field for players and monsters.
+                "current_hp": state.get("hp_current", class_data["hp_max"]),
                 "hp_max": class_data["hp_max"],
                 "status_effects": state.get("status_effects", []),
                 "initiative": session.combat_state.get("initiative_values", {}).get(f"pc:{slot}"),
@@ -529,13 +672,15 @@ def _build_visible_monster_targets(session: SessionModel) -> list[dict]:
     for instance in opposition_state.get("instances", []):
         if instance.get("is_dead"):
             continue
+        instance_type = instance.get("monster_type") or opposition_state.get("monster_type", "")
+        instance_stats = instance.get("monster_stats") or monster_stats
         targets.append(
             {
                 "target_id": instance.get("monster_id", ""),
                 "target_type": "monster",
                 "name": instance.get("display_name", "Monster"),
-                "monster_type": opposition_state.get("monster_type", ""),
-                "armor_class": monster_stats.get("ac"),
+                "monster_type": instance_type,
+                "armor_class": instance_stats.get("ac"),
                 "current_hp": instance.get("current_hp", 0),
                 "hp_max": instance.get("hp_max", 0),
                 "status_effects": instance.get("status_effects", []),
@@ -685,7 +830,14 @@ def _build_player_action_catalog(class_data: dict) -> list[dict]:
             actions.append({"action_type": "SPELL", "ability": "MAGIC_MISSILE", "display_name": "Magic Missile"})
         if class_data.get("class_id") in {"Cleric", "Druid"}:
             actions.append({"action_type": "SPELL", "ability": "CURE_WOUNDS", "display_name": "Cure Wounds"})
-    actions.append({"action_type": "SKILL", "ability": "ATHLETICS", "display_name": "Athletics"})
+    actions.extend(
+        [
+            {"action_type": "SKILL", "ability": "ATHLETICS", "display_name": "Athletics"},
+            {"action_type": "SKILL", "ability": "PERCEPTION", "display_name": "Perception"},
+            {"action_type": "SKILL", "ability": "INVESTIGATION", "display_name": "Investigation"},
+            {"action_type": "SKILL", "ability": "SEARCH", "display_name": "Search"},
+        ]
+    )
     return actions
 
 
@@ -708,14 +860,15 @@ def _inventory_items_overlap(left: str, right: str) -> bool:
 
 def _build_monster_actor_catalog(session: SessionModel) -> list[dict]:
     opposition_state = copy.deepcopy(session.opposition_state or _empty_opposition_state())
-    monster_stats = opposition_state.get("monster_stats", {})
-    damage_formula = _extract_monster_damage_formula(monster_stats)
-    attack_bonus = int(monster_stats.get("attack_bonus", 0) or 0)
-    attack_formula = f"1d20+{attack_bonus}" if attack_bonus >= 0 else f"1d20{attack_bonus}"
+    group_stats = opposition_state.get("monster_stats", {})
     actors: list[dict] = []
     for instance in opposition_state.get("instances", []):
         if instance.get("is_dead"):
             continue
+        monster_stats = instance.get("monster_stats") or group_stats
+        damage_formula = _extract_monster_damage_formula(monster_stats)
+        attack_bonus = int(monster_stats.get("attack_bonus", 0) or 0)
+        attack_formula = f"1d20+{attack_bonus}" if attack_bonus >= 0 else f"1d20{attack_bonus}"
         actors.append(
             {
                 "actor_id": instance.get("monster_id", ""),
@@ -838,12 +991,25 @@ def _list_viable_targets(context: dict) -> list[dict[str, Any]]:
     return sorted(targets, key=lambda item: (str(item["target_type"]), str(item["name"])))
 
 
+def _is_living_target(target: dict[str, Any]) -> bool:
+    try:
+        return int(target.get("current_hp", 0) or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
 def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str, Any]:
     context = _resolve_payload_context(payload)
     actions = args.get("actions", [])
     normalized_actions: list[dict[str, Any]] = []
     validation_errors: list[dict[str, Any]] = []
     viable_targets = _list_viable_targets(context)
+    opposition_actor_ids = {
+        str(item.get("actor_id", "") or "")
+        for item in context["mechanical_hint"].get("living_monster_actors", [])
+        if str(item.get("actor_id", "") or "")
+    }
+    is_opposition_turn = bool(opposition_actor_ids) and not str(context["mechanical_hint"].get("actor_id", "") or "")
 
     for index, action in enumerate(actions):
         raw_actor_id = str(action.get("actor_id", "") or "")
@@ -884,6 +1050,68 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
             )
             continue
 
+        if is_opposition_turn and actor_id not in opposition_actor_ids:
+            validation_errors.append(
+                {
+                    "action_index": index,
+                    "kind": "invalid_actor_for_opposition",
+                    "provided_actor_id": raw_actor_id,
+                    "resolved_actor_id": actor_id,
+                    "reason": "Opposition may only act with currently living monster actors.",
+                }
+            )
+            continue
+
+        if action_type == "ATTACK" and actor_id in opposition_actor_ids:
+            # Monster actors only have one mechanical attack profile in this system.
+            # Canonicalize ability to that profile so wording differences from the
+            # model do not degrade into synthetic auto-misses.
+            canonical_ability = _normalize_ability_name(str(actor.get("ability", "") or ""))
+            if canonical_ability:
+                ability = canonical_ability
+
+        target_type = str(target.get("target_type", "") or "")
+        if action_type == "ATTACK" or (action_type == "SPELL" and ability == "MAGIC_MISSILE"):
+            # Keep monster-target guard to prevent replay/phantom damage against dead monsters.
+            # Do not block player targets at 0 HP; opposition may intentionally target downed PCs.
+            if target_type == "monster" and not _is_living_target(target):
+                validation_errors.append(
+                    {
+                        "action_index": index,
+                        "kind": "invalid_target_state",
+                        "provided_target_id": raw_target_id,
+                        "resolved_target_id": target_id,
+                        "reason": "Attack target must be a living creature.",
+                        "viable_targets": [
+                            item
+                            for item in viable_targets
+                            if int(item.get("current_hp", 0) or 0) > 0
+                        ],
+                    }
+                )
+                continue
+
+        if action_type == "SPELL" and ability == "CURE_WOUNDS":
+            hp_current = int(target.get("current_hp", 0) or 0)
+            hp_max = int(target.get("hp_max", 0) or 0)
+            if target_type != "player" or hp_current >= hp_max:
+                validation_errors.append(
+                    {
+                        "action_index": index,
+                        "kind": "invalid_heal_target",
+                        "provided_target_id": raw_target_id,
+                        "resolved_target_id": target_id,
+                        "reason": "Cure Wounds requires an injured ally target.",
+                        "viable_targets": [
+                            item
+                            for item in viable_targets
+                            if str(item.get("target_type", "") or "") == "player"
+                            and int(item.get("current_hp", 0) or 0) < int(item.get("hp_max", 0) or 0)
+                        ],
+                    }
+                )
+                continue
+
         normalized_actions.append(
             {
                 "actor_id": actor_id,
@@ -892,6 +1120,17 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                 "target_id": target_id,
             }
         )
+
+    if is_opposition_turn and normalized_actions:
+        deduped_actions: list[dict[str, Any]] = []
+        seen_actor_ids: set[str] = set()
+        for action in normalized_actions:
+            action_actor_id = str(action.get("actor_id", "") or "")
+            if not action_actor_id or action_actor_id in seen_actor_ids:
+                continue
+            seen_actor_ids.add(action_actor_id)
+            deduped_actions.append(action)
+        normalized_actions = deduped_actions
 
     if validation_errors:
         return {
@@ -935,6 +1174,14 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
 
         if action_type == "ATTACK":
             attack_profile = context["action_map"].get((actor_id, ability), {})
+            if not attack_profile and actor_id in opposition_actor_ids:
+                attack_profile = context["actor_map"].get(actor_id, {})
+            if not attack_profile:
+                fallback_profile = next(
+                    (profile for (profile_actor_id, _), profile in context["action_map"].items() if profile_actor_id == actor_id),
+                    {},
+                )
+                attack_profile = fallback_profile
             attack_formula = attack_profile.get("attack_formula", "")
             damage_formula = attack_profile.get("damage_formula", "")
             damage_type = attack_profile.get("damage_type", "")
@@ -958,9 +1205,13 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                             "target_type": target_type or "monster",
                             "target_slot": target_slot,
                             "target_id": target_id,
+                            "actor_id": actor_id,
+                            "ability": ability,
                             "changes": [{"kind": "damage", "amount": damage, "value": ""}],
                         }
                     )
+            else:
+                result["reason"] = "No valid attack profile found."
             results.append(result)
             continue
 
@@ -976,6 +1227,8 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                         "target_type": target_type or "monster",
                         "target_slot": target_slot,
                         "target_id": target_id,
+                        "actor_id": actor_id,
+                        "ability": ability,
                         "changes": [{"kind": "damage", "amount": damage, "value": ""}],
                     }
                 )
@@ -999,6 +1252,8 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                         "target_type": target_type or "player",
                         "target_slot": target_slot,
                         "target_id": target_id,
+                        "actor_id": actor_id,
+                        "ability": ability,
                         "changes": [{"kind": "healing", "amount": healing, "value": ""}],
                     }
                 )
@@ -1061,6 +1316,7 @@ def _build_opposition_payload(db: Session, session: SessionModel, user_text: str
             for event in recent_events
         ],
         "current_location": session.current_location_text,
+        "mission_objective": _mission_context_for_agents(session),
         "user_prompt": user_text,
     }
 
@@ -1113,7 +1369,10 @@ def lock_tab1(db: Session, session_id: str) -> SessionModel:
     session.state = SessionState.ACTIVE
     session.combat_state = _empty_combat_state()
     session.opposition_state = _empty_opposition_state()
+    session.current_location_id = ""
+    session.current_location_name = "Antlers Rest Inn"
     session.generated_image = _default_generated_image()
+    session.mission_objective_state = _empty_mission_objective_state(tab1.adventure_id)
     session.selected_narrative_player_id = tab1.selected_player_ids[0]
     db.add(
         Event(
@@ -1213,6 +1472,185 @@ def _append_system_event(db: Session, session_id: str, prompt_index: int, kind: 
     )
 
 
+def _slot_from_actor_id(actor_id: str) -> int:
+    if actor_id.startswith("pc:"):
+        try:
+            return int(actor_id.replace("pc:", ""))
+        except ValueError:
+            return 0
+    return 0
+
+
+def _apply_action_objective_updates(db: Session, session: SessionModel, agent_slot: int, prompt_index: int, result: dict[str, Any]) -> None:
+    state = copy.deepcopy(session.mission_objective_state or {})
+    adventure_id = state.get("adventure_id", "")
+    if not adventure_id or state.get("complete"):
+        return
+    action_type = str(result.get("action_type", "") or "").upper()
+    ability = str(result.get("ability", "") or "").upper()
+    success = bool(result.get("success", False))
+    actor_id = str(result.get("actor_id", "") or "")
+    actor_slot = _slot_from_actor_id(actor_id) or agent_slot
+
+    if adventure_id == "old-people-barrow" and action_type == "SKILL" and success:
+        config = MISSION_OBJECTIVE_CONFIG[adventure_id]
+        if session.current_location_id != config["target_location_id"] or state.get("item_awarded"):
+            return
+        item_name = config["item_name"]
+        _append_state_change(
+            db,
+            session,
+            prompt_index,
+            target_type="player",
+            target_slot=actor_slot,
+            kind="inventory_add",
+            value=item_name,
+            source="mission_objective",
+            actor_id=actor_id,
+        )
+        state["item_awarded"] = True
+        state["awarded_to_slot"] = actor_slot
+        _set_mission_complete(
+            db,
+            session,
+            prompt_index,
+            state,
+            f"{item_name} recovered from The Burial Vault.",
+            {"adventure_id": adventure_id, "item": item_name, "awarded_to_slot": actor_slot, "ability": ability},
+        )
+
+
+def _apply_monster_death_objective_updates(
+    db: Session,
+    session: SessionModel,
+    prompt_index: int,
+    opposition_state: dict,
+    killed_instance: dict,
+    living_instances: list[dict],
+    actor_id: str = "",
+) -> None:
+    state = copy.deepcopy(session.mission_objective_state or {})
+    adventure_id = state.get("adventure_id", "")
+    if not adventure_id or state.get("complete"):
+        return
+    actor_slot = _slot_from_actor_id(actor_id)
+
+    if adventure_id == "icebane-castle":
+        config = MISSION_OBJECTIVE_CONFIG[adventure_id]
+        if session.current_location_id != config["target_location_id"] or living_instances or state.get("item_awarded"):
+            return
+        item_name = config["item_name"]
+        if actor_slot:
+            _append_state_change(
+                db,
+                session,
+                prompt_index,
+                target_type="player",
+                target_slot=actor_slot,
+                kind="inventory_add",
+                value=item_name,
+                source="mission_objective",
+                actor_id=actor_id,
+            )
+        state["item_awarded"] = True
+        state["awarded_to_slot"] = actor_slot
+        _set_mission_complete(
+            db,
+            session,
+            prompt_index,
+            state,
+            f"{item_name} recovered from The Fractured Throne Room.",
+            {"adventure_id": adventure_id, "item": item_name, "awarded_to_slot": actor_slot},
+        )
+        return
+
+    if adventure_id == "east-marsh-raid":
+        if not state.get("boss_encounter_spawned"):
+            return
+        if opposition_state.get("group_id") != state.get("boss_encounter_group_id"):
+            return
+        if living_instances:
+            return
+        state["boss_defeated"] = True
+        _set_mission_complete(
+            db,
+            session,
+            prompt_index,
+            state,
+            "The war leader and his beast have been defeated.",
+            {"adventure_id": adventure_id, "group_id": opposition_state.get("group_id", "")},
+        )
+        return
+
+    if adventure_id == "endless-glacier-undead":
+        target_kills = int(state.get("target_kills", MISSION_OBJECTIVE_CONFIG[adventure_id]["target_kills"]))
+        current = int(state.get("undead_kills", 0)) + 1
+        state["undead_kills"] = current
+        if current >= target_kills:
+            _set_mission_complete(
+                db,
+                session,
+                prompt_index,
+                state,
+                f"Undead defeated: {target_kills}/{target_kills}.",
+                {"adventure_id": adventure_id, "undead_kills": current, "target_kills": target_kills},
+            )
+            return
+        note = f"Undead defeated: {current}/{target_kills}."
+        state["progress_label"] = note
+        state.setdefault("updates", []).append({"prompt_index": prompt_index, "text": note})
+        session.mission_objective_state = state
+        _append_system_event(
+            db,
+            session.session_id,
+            prompt_index,
+            EventKind.OBJECTIVE_UPDATED,
+            f"Objective progress: {note}",
+            {"adventure_id": adventure_id, "undead_kills": current, "target_kills": target_kills},
+        )
+        return
+
+    if adventure_id == "collecting-taxes" and not living_instances:
+        target_gold = int(state.get("target_gold", MISSION_OBJECTIVE_CONFIG[adventure_id]["target_gold"]))
+        gold_awarded = 50 + randbelow(76)
+        current_gold = int(state.get("gold_collected", 0)) + gold_awarded
+        state["gold_collected"] = current_gold
+        if actor_slot:
+            _append_state_change(
+                db,
+                session,
+                prompt_index,
+                target_type="player",
+                target_slot=actor_slot,
+                kind="inventory_add",
+                value=f"{gold_awarded}gp",
+                source="mission_objective",
+                actor_id=actor_id,
+            )
+        if current_gold >= target_gold:
+            _set_mission_complete(
+                db,
+                session,
+                prompt_index,
+                state,
+                f"Gold collected: {current_gold}/{target_gold}gp.",
+                {"adventure_id": adventure_id, "gold_awarded": gold_awarded, "gold_collected": current_gold, "target_gold": target_gold},
+            )
+            return
+        note = f"Gold collected: {current_gold}/{target_gold}gp. {gold_awarded}gp recovered from the encounter."
+        state["progress_label"] = note
+        state.setdefault("updates", []).append({"prompt_index": prompt_index, "text": note})
+        session.mission_objective_state = state
+        _append_system_event(
+            db,
+            session.session_id,
+            prompt_index,
+            EventKind.OBJECTIVE_UPDATED,
+            f"Objective progress: {note}",
+            {"adventure_id": adventure_id, "gold_awarded": gold_awarded, "gold_collected": current_gold, "target_gold": target_gold},
+        )
+
+
 def _apply_generation_result(db: Session, session: SessionModel, agent_slot: int, prompt_index: int, generation: GenerationResult) -> None:
     for result in generation.pending_roll_results:
         label = str(result.get("label", "") or result.get("formula", "Dice Roll"))
@@ -1229,9 +1667,24 @@ def _apply_generation_result(db: Session, session: SessionModel, agent_slot: int
             )
         )
 
+    seen_attack_keys: set[tuple[str, str, str, str, bool, int, int, int]] = set()
     for result in generation.pending_action_results:
         action_type = str(result.get("action_type", "")).upper()
         ability = str(result.get("ability", "")).upper()
+        attack_key = (
+            str(result.get("actor_id", "") or ""),
+            str(result.get("target_id", "") or ""),
+            action_type,
+            ability,
+            bool(result.get("hit", False)),
+            int(result.get("damage", 0) or 0),
+            int(result.get("healing", 0) or 0),
+            int(result.get("target_hp_after", 0) or 0),
+        )
+        if attack_key in seen_attack_keys:
+            continue
+        seen_attack_keys.add(attack_key)
+        _apply_action_objective_updates(db, session, agent_slot, prompt_index, result)
         if action_type != "ATTACK" and not (action_type == "SPELL" and ability == "MAGIC_MISSILE"):
             continue
         db.add(
@@ -1252,6 +1705,7 @@ def _apply_generation_result(db: Session, session: SessionModel, agent_slot: int
             )
         )
 
+    seen_state_change_keys: set[tuple[str, str, int, str, int, str]] = set()
     for payload in generation.pending_state_changes:
         source = payload.get("source", "tool")
         for target in payload.get("targets", []):
@@ -1260,6 +1714,17 @@ def _apply_generation_result(db: Session, session: SessionModel, agent_slot: int
                 kind = str(change.get("kind", "") or "")
                 amount = int(change.get("amount", 0) or 0)
                 value = str(change.get("value", "") or "")
+                state_key = (
+                    target_type,
+                    str(target.get("target_id", "") or ""),
+                    int(target.get("target_slot", 0) or 0),
+                    kind,
+                    amount,
+                    value,
+                )
+                if state_key in seen_state_change_keys:
+                    continue
+                seen_state_change_keys.add(state_key)
                 if target_type == "monster":
                     _append_state_change(
                         db,
@@ -1271,6 +1736,7 @@ def _apply_generation_result(db: Session, session: SessionModel, agent_slot: int
                         amount=amount,
                         value=value,
                         source=source,
+                        actor_id=str(target.get("actor_id", "") or ""),
                     )
                 else:
                     _append_state_change(
@@ -1283,6 +1749,7 @@ def _apply_generation_result(db: Session, session: SessionModel, agent_slot: int
                         amount=amount,
                         value=value,
                         source=source,
+                        actor_id=str(target.get("actor_id", "") or ""),
                     )
 
 
@@ -1297,6 +1764,7 @@ def _append_state_change(
     amount: int = 0,
     value: str = "",
     source: str = "unknown",
+    actor_id: str = "",
 ) -> None:
     if target_type == "monster":
         opposition_state = copy.deepcopy(session.opposition_state or _empty_opposition_state())
@@ -1386,6 +1854,16 @@ def _append_state_change(
             )
         session.opposition_state = opposition_state
         living_instances = _living_opposition_instances(opposition_state)
+        if instance.get("is_dead") and hp_before > 0:
+            _apply_monster_death_objective_updates(
+                db,
+                session,
+                prompt_index,
+                opposition_state,
+                instance,
+                living_instances,
+                actor_id=actor_id,
+            )
         logger.info(
             "Opposition audit: session=%s prompt=%s active=%s living_count=%s instances=%s",
             session.session_id,
@@ -1738,6 +2216,75 @@ def end_chapter(db: Session, session_id: str) -> SessionModel:
     return session
 
 
+def _validate_mission_travel(session: SessionModel, location_id: str) -> None:
+    state = session.mission_objective_state or {}
+    if state.get("adventure_id") != "telas-wagons" or state.get("complete"):
+        return
+    allowed = set(state.get("allowed_location_ids", []))
+    if allowed and location_id not in allowed:
+        raise ValueError("The wagon train cannot travel there yet. Follow the King's Way route in order.")
+
+
+def _apply_travel_objective_updates(db: Session, session: SessionModel, prompt_index: int, location_id: str) -> None:
+    state = copy.deepcopy(session.mission_objective_state or {})
+    adventure_id = state.get("adventure_id", "")
+    if not adventure_id or state.get("complete"):
+        return
+
+    if adventure_id == "telas-wagons":
+        sequence = MISSION_OBJECTIVE_CONFIG[adventure_id]["travel_sequence"]
+        if location_id not in sequence:
+            return
+        step_index = sequence.index(location_id)
+        state["visited_location_ids"] = list(dict.fromkeys([*state.get("visited_location_ids", []), location_id]))
+        state["current_step"] = step_index + 1
+        if location_id == sequence[-1]:
+            _set_mission_complete(
+                db,
+                session,
+                prompt_index,
+                state,
+                (
+                    "The convoy of tradesmen thanks the party for their efforts providing much needed safety "
+                    "along the King's Way. You are paid for your efforts and free to return to Moosehearth."
+                ),
+                {"adventure_id": adventure_id, "location_id": location_id},
+            )
+            return
+        state["allowed_location_ids"] = [sequence[step_index + 1]]
+        note = f"Wagon route progress: location {step_index + 1}/6 reached. Next stop unlocked."
+        state["progress_label"] = note
+        state.setdefault("updates", []).append({"prompt_index": prompt_index, "text": note})
+        session.mission_objective_state = state
+        _append_system_event(
+            db,
+            session.session_id,
+            prompt_index,
+            EventKind.OBJECTIVE_UPDATED,
+            f"Objective progress: {note}",
+            {"adventure_id": adventure_id, "location_id": location_id, "next_location_id": sequence[step_index + 1]},
+        )
+        return
+
+    if adventure_id == "east-marsh-raid" and location_id == MISSION_OBJECTIVE_CONFIG[adventure_id]["target_location_id"]:
+        if state.get("boss_encounter_spawned") or (session.opposition_state or {}).get("active"):
+            return
+        _spawn_opposition_group(db, session, ["Bandit Captain", "Giant Boar"], prompt_index, source="mission_objective")
+        state["boss_encounter_spawned"] = True
+        state["boss_encounter_group_id"] = session.opposition_state.get("group_id", "")
+        state["progress_label"] = "The war leader has been found. Defeat the Bandit Captain and Giant Boar."
+        state.setdefault("updates", []).append({"prompt_index": prompt_index, "text": state["progress_label"]})
+        session.mission_objective_state = state
+        _append_system_event(
+            db,
+            session.session_id,
+            prompt_index,
+            EventKind.OBJECTIVE_UPDATED,
+            f"Objective progress: {state['progress_label']}",
+            {"adventure_id": adventure_id, "location_id": location_id, "boss_encounter_spawned": True},
+        )
+
+
 def travel_to_location(db: Session, session_id: str, location_id: str, location_name: str, location_description: str) -> SessionModel:
     session = get_session_or_404(db, session_id)
     if session.state != SessionState.ACTIVE:
@@ -1747,8 +2294,18 @@ def travel_to_location(db: Session, session_id: str, location_id: str, location_
     clean_description = (location_description or "").strip()
     if not clean_name or not clean_description:
         raise ValueError("Location name and description are required")
+    _validate_mission_travel(session, location_id)
 
-    travel_text = f"The party ventures to, {clean_name}, surveying the area you see {clean_description}."
+    travel_intro = ""
+    mission_state = session.mission_objective_state or {}
+    if mission_state.get("adventure_id") == "telas-wagons" and location_id == "loc-1":
+        travel_intro = (
+            "The party meets up with the wagon train just outside of town. Speaking with the tradesmen, "
+            "the party is directed to take the lead as the wagons begin their slow crawl along the King's Way.\n\n"
+        )
+    travel_text = f"{travel_intro}The party ventures to, {clean_name}, surveying the area you see {clean_description}."
+    session.current_location_id = location_id
+    session.current_location_name = clean_name
     session.current_location_text = travel_text
     db.add(
         Event(
@@ -1759,6 +2316,40 @@ def travel_to_location(db: Session, session_id: str, location_id: str, location_
             agent_slot=None,
             text=travel_text,
             json_payload={"location_id": location_id, "location_name": clean_name, "source": "travel_button"},
+        )
+    )
+    _apply_travel_objective_updates(db, session, session.prompt_index, location_id)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+def return_to_moosehearth(db: Session, session_id: str) -> SessionModel:
+    session = get_session_or_404(db, session_id)
+    if session.state != SessionState.ACTIVE:
+        raise ValueError("Return to Moosehearth is allowed only during ACTIVE play")
+    objective_state = session.mission_objective_state or {}
+    if not objective_state.get("complete"):
+        raise ValueError("Complete the current mission objective before returning to Moosehearth")
+    if (session.opposition_state or {}).get("active"):
+        raise ValueError("Resolve or flee the active encounter before returning to Moosehearth")
+
+    return_text = "The party returns to Moosehearth to report their success and recover at the Antlers' Rest Inn."
+    session.current_location_id = ""
+    session.current_location_name = "Antlers Rest Inn"
+    session.current_location_text = return_text
+    objective_state = copy.deepcopy(objective_state)
+    objective_state["returned_to_moosehearth"] = True
+    session.mission_objective_state = objective_state
+    db.add(
+        Event(
+            session_id=session_id,
+            prompt_index=session.prompt_index,
+            role=EventRole.SYSTEM,
+            kind=EventKind.TRANSCRIPT,
+            agent_slot=None,
+            text=return_text,
+            json_payload={"source": "return_to_moosehearth"},
         )
     )
     db.commit()
@@ -1817,6 +2408,58 @@ def take_long_rest(db: Session, session_id: str) -> SessionModel:
     return session
 
 
+def _spawn_opposition_group(
+    db: Session,
+    session: SessionModel,
+    monster_types: list[str],
+    prompt_index: int,
+    source: str = "manual",
+) -> SessionModel:
+    if not monster_types or len(monster_types) > 4:
+        raise ValueError("Opposition group must contain between 1 and 4 monsters")
+    instances = []
+    for index, instance_type in enumerate(monster_types):
+        template = _monster_template(instance_type)
+        instances.append(
+            {
+                "monster_id": str(uuid.uuid4()),
+                "display_name": MONSTER_INSTANCE_LABELS[index],
+                "monster_type": instance_type,
+                "monster_stats": template,
+                "current_hp": template["hp"],
+                "hp_max": template["hp"],
+                "is_dead": False,
+                "status_effects": [],
+            }
+        )
+    group_type = monster_types[0] if len(set(monster_types)) == 1 else "Mixed"
+    group_stats = _monster_template(monster_types[0])
+    session.opposition_state = {
+        "active": True,
+        "group_id": str(uuid.uuid4()),
+        "initiative_id": OPPOSITION_INITIATIVE_ID,
+        "monster_type": group_type,
+        "monster_stats": group_stats,
+        "instances": instances,
+        "cleanup_after": "",
+        "source": source,
+    }
+    if OPPOSITION_AGENT_SLOT not in session.selected_agent_slots:
+        session.selected_agent_slots = [*session.selected_agent_slots, OPPOSITION_AGENT_SLOT]
+    session.agent_names[str(OPPOSITION_AGENT_SLOT)] = OPPOSITION_DISPLAY_NAME
+    summary = ", ".join(monster_types)
+    _append_system_event(
+        db,
+        session.session_id,
+        prompt_index,
+        EventKind.OPPOSITION_SPAWNED,
+        f"Opposition spawned: {summary}.",
+        {"monster_types": monster_types, "quantity": len(monster_types), "source": source},
+    )
+    roll_initiative(db, session.session_id)
+    return session
+
+
 def spawn_opposition(db: Session, session_id: str, monster_type: str, quantity: int) -> SessionModel:
     session = get_session_or_404(db, session_id)
     tab1 = get_tab1_or_create(db, session_id)
@@ -1830,40 +2473,7 @@ def spawn_opposition(db: Session, session_id: str, monster_type: str, quantity: 
     if monster_type not in ADVENTURES.get(tab1.adventure_id, {}).get("monsters", []):
         raise ValueError("That monster is not assigned to the selected adventure")
 
-    template = _monster_template(monster_type)
-    instances = []
-    for index in range(quantity):
-        instances.append(
-            {
-                "monster_id": str(uuid.uuid4()),
-                "display_name": MONSTER_INSTANCE_LABELS[index],
-                "current_hp": template["hp"],
-                "hp_max": template["hp"],
-                "is_dead": False,
-                "status_effects": [],
-            }
-        )
-    session.opposition_state = {
-        "active": True,
-        "group_id": str(uuid.uuid4()),
-        "initiative_id": OPPOSITION_INITIATIVE_ID,
-        "monster_type": monster_type,
-        "monster_stats": template,
-        "instances": instances,
-        "cleanup_after": "",
-    }
-    if OPPOSITION_AGENT_SLOT not in session.selected_agent_slots:
-        session.selected_agent_slots = [*session.selected_agent_slots, OPPOSITION_AGENT_SLOT]
-    session.agent_names[str(OPPOSITION_AGENT_SLOT)] = OPPOSITION_DISPLAY_NAME
-    _append_system_event(
-        db,
-        session.session_id,
-        session.prompt_index,
-        EventKind.OPPOSITION_SPAWNED,
-        f"Opposition spawned: {quantity} x {monster_type}.",
-        {"monster_type": monster_type, "quantity": quantity},
-    )
-    roll_initiative(db, session_id)
+    _spawn_opposition_group(db, session, [monster_type for _ in range(quantity)], session.prompt_index, source="manual")
     db.commit()
     db.refresh(session)
     return session
@@ -2018,9 +2628,12 @@ def reset_session(db: Session, session_id: str) -> SessionModel:
     session.agent_names = {str(slot): _default_name(slot) for slot in range(1, 5)}
     session.narrative_agent_definition_text = ""
     session.current_location_text = ""
+    session.current_location_id = ""
+    session.current_location_name = ""
     session.selected_narrative_player_id = ""
     session.combat_state = _empty_combat_state()
     session.opposition_state = _empty_opposition_state()
+    session.mission_objective_state = _empty_mission_objective_state()
     session.generated_image = _default_generated_image()
 
     db.commit()

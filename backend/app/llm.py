@@ -490,6 +490,7 @@ class OpenAIProvider(LLMProvider):
         recent = payload["recent_context"]
         opposition_state = payload.get("opposition_state", {})
         mechanical_hint = payload.get("mechanical_resolution_hint", {})
+        mission_objective = payload.get("mission_objective", {})
         current_location = payload.get("current_location", "")
         user_prompt = payload["user_prompt"]
         lines = []
@@ -511,6 +512,8 @@ class OpenAIProvider(LLMProvider):
             f"{json.dumps(mechanical_hint, ensure_ascii=True)}\n\n"
             "[Current Location]\n"
             f"{current_location}\n\n"
+            "[Mission Objective]\n"
+            f"{json.dumps(mission_objective, ensure_ascii=True)}\n\n"
             "[Opposition State]\n"
             f"{json.dumps(opposition_state, ensure_ascii=True)}\n\n"
             "[Recent Context]\n"
@@ -538,6 +541,9 @@ class OpenAIProvider(LLMProvider):
             "MAGIC_MISSILE",
             "CURE_WOUNDS",
             "ATHLETICS",
+            "PERCEPTION",
+            "INVESTIGATION",
+            "SEARCH",
         ]
         supported_abilities.extend(
             re.sub(r"[^A-Z0-9]+", "_", name.strip().upper()).strip("_")

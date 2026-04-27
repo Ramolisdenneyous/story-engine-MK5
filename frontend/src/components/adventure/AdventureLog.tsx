@@ -50,7 +50,7 @@ export function AdventureLog({
         {transcript.map((event) => (
           <div
             key={event.event_id}
-            className="transcript-line"
+            className={event.kind === "objective_updated" ? "transcript-line transcript-line--objective" : "transcript-line"}
             style={{ color: event.role === "agent" && event.agent_slot ? SLOT_COLORS[event.agent_slot] : "var(--text-primary)" }}
           >
             {event.text}

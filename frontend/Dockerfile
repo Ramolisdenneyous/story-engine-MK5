@@ -4,7 +4,9 @@ COPY package.json package-lock.json* ./
 RUN npm install
 COPY . .
 ARG VITE_API_BASE=http://localhost:8001
+ARG VITE_TUTORIAL_VIDEO_URL=
 ENV VITE_API_BASE=${VITE_API_BASE}
+ENV VITE_TUTORIAL_VIDEO_URL=${VITE_TUTORIAL_VIDEO_URL}
 RUN npm run build
 
 FROM node:22-alpine

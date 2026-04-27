@@ -18,6 +18,7 @@ type LocationCellProps = {
   onSetActiveLocationId: (locationId: string) => void;
   onSetLocationView: (view: LocationView) => void;
   onTravelToSelectedLocation: () => void;
+  onReturnToMoosehearth: () => void;
   displayAdventureTitle: (adventure: SessionDetail["tab1"]["active_adventure"]) => string;
   encounterLocationTitle: string;
   playedAttackEventIds: string[];
@@ -79,41 +80,60 @@ function hpLossPercent(current: number, max: number) {
 
 function buildOppositionDisplayEntries(opposition: OppositionState | null, monsters: Monster[]) {
   if (!opposition?.active) return [] as DisplayOppositionEntry[];
-  const monsterCard = monsters.find((monster) => monster.monster_id === opposition.monster_type);
-  if (!monsterCard) return [] as DisplayOppositionEntry[];
-  const imageUrl = resolveApiUrl(monsterCard.image_url);
   return opposition.instances
     .slice(0, 4)
-    .map((instance) => ({
-      monsterId: instance.monster_id,
-      displayName: instance.display_name,
-      currentHp: instance.current_hp,
-      hpMax: instance.hp_max,
-      imageUrl,
-      isDying: instance.is_dead || instance.current_hp <= 0,
-    }));
+    .map((instance) => {
+      const instanceType = instance.monster_type || opposition.monster_type;
+      const monsterCard = monsters.find((monster) => monster.monster_id === instanceType) ?? monsters.find((monster) => monster.monster_id === opposition.monster_type);
+      return {
+        monsterId: instance.monster_id,
+        displayName: instance.display_name,
+        currentHp: instance.current_hp,
+        hpMax: instance.hp_max,
+        imageUrl: monsterCard ? resolveApiUrl(monsterCard.image_url) : "",
+        isDying: instance.is_dead || instance.current_hp <= 0,
+      };
+    })
+    .filter((entry) => entry.imageUrl);
 }
 
-function buildAttackGroups(detail: SessionDetail, playedAttackEventIds: string[]) {
+function buildLatestAttackSelection(detail: SessionDetail, playedAttackEventIds: string[]) {
   const played = new Set(playedAttackEventIds);
-  const groups: PendingAttackResolution[][] = [];
+  const unplayed: PendingAttackResolution[] = [];
   for (const event of detail.events) {
     if (event.kind !== "attack_resolved" || played.has(event.event_id)) {
       continue;
     }
-    const entry: PendingAttackResolution = {
+    unplayed.push({
       eventId: event.event_id,
       promptIndex: event.prompt_index,
       ...(event.json_payload as AttackResolvedPayload),
-    };
-    const currentGroup = groups[groups.length - 1];
-    if (currentGroup && currentGroup[0]?.promptIndex === entry.promptIndex) {
-      currentGroup.push(entry);
-    } else {
-      groups.push([entry]);
-    }
+    });
   }
-  return groups;
+  if (!unplayed.length) {
+    return { latestGroup: [] as PendingAttackResolution[], staleEventIds: [] as string[] };
+  }
+  const latestPromptIndex = unplayed[unplayed.length - 1]?.promptIndex ?? 0;
+  const latestGroupRaw = unplayed.filter((entry) => entry.promptIndex === latestPromptIndex);
+  const latestGroupSeen = new Set<string>();
+  const latestGroup = latestGroupRaw.filter((entry) => {
+    const key = [
+      entry.actor_id,
+      entry.target_id,
+      String(entry.hit),
+      String(entry.damage),
+      String(entry.target_hp_after),
+    ].join("|");
+    if (latestGroupSeen.has(key)) {
+      return false;
+    }
+    latestGroupSeen.add(key);
+    return true;
+  });
+  const staleEventIds = unplayed
+    .filter((entry) => entry.promptIndex !== latestPromptIndex)
+    .map((entry) => entry.eventId);
+  return { latestGroup, staleEventIds };
 }
 
 function buildOverlayScene(
@@ -259,6 +279,7 @@ export function LocationCell({
   onSetActiveLocationId,
   onSetLocationView,
   onTravelToSelectedLocation,
+  onReturnToMoosehearth,
   displayAdventureTitle,
   encounterLocationTitle,
   playedAttackEventIds,
@@ -270,12 +291,15 @@ export function LocationCell({
   const previousOppositionEntriesRef = useRef<DisplayOppositionEntry[]>([]);
   const fadeTimerRef = useRef<number | null>(null);
   const animationTimerRef = useRef<number | null>(null);
+  const activeSceneKeyRef = useRef("");
   const selectedLocation = adventureLocations.find((location) => location.id === activeLocation?.id) ?? null;
+  const missionObjective = detail.session.mission_objective_state;
+  const allowedLocationIds = new Set(missionObjective?.allowed_location_ids ?? []);
   const liveOppositionEntries = useMemo(() => buildOppositionDisplayEntries(activeOpposition, gmMonsters), [activeOpposition, gmMonsters]);
-  const pendingAttackGroups = useMemo(() => buildAttackGroups(detail, playedAttackEventIds), [detail, playedAttackEventIds]);
+  const latestAttackSelection = useMemo(() => buildLatestAttackSelection(detail, playedAttackEventIds), [detail, playedAttackEventIds]);
   const nextOverlayScene = useMemo(
-    () => buildOverlayScene(pendingAttackGroups[0] ?? [], detail.tab1.party, liveOppositionEntries),
-    [detail.tab1.party, liveOppositionEntries, pendingAttackGroups],
+    () => buildOverlayScene(latestAttackSelection.latestGroup, detail.tab1.party, liveOppositionEntries),
+    [detail.tab1.party, liveOppositionEntries, latestAttackSelection.latestGroup],
   );
 
   const playerRotationOrder = useMemo(() => {
@@ -324,12 +348,21 @@ export function LocationCell({
   }, [liveOppositionEntries]);
 
   useEffect(() => {
-    if (activeOverlayScene || !nextOverlayScene) {
+    if (!nextOverlayScene) {
       return;
     }
+    const nextSceneKey = nextOverlayScene.eventIds.join("|");
+    if (!nextSceneKey || activeSceneKeyRef.current === nextSceneKey || activeOverlayScene) {
+      return;
+    }
+    activeSceneKeyRef.current = nextSceneKey;
     onAnimationStateChange(true);
+    latestAttackSelection.staleEventIds.forEach((eventId) => onMarkAttackAnimationPlayed(eventId));
     nextOverlayScene.eventIds.forEach((eventId) => onMarkAttackAnimationPlayed(eventId));
     setActiveOverlayScene(nextOverlayScene);
+    if (animationTimerRef.current) {
+      window.clearTimeout(animationTimerRef.current);
+    }
     animationTimerRef.current = window.setTimeout(() => {
       animationTimerRef.current = null;
       void onAnimationSettled()
@@ -338,10 +371,13 @@ export function LocationCell({
           setActiveOverlayScene((current) => (
             current?.eventIds.join("|") === nextOverlayScene.eventIds.join("|") ? null : current
           ));
+          if (activeSceneKeyRef.current === nextSceneKey) {
+            activeSceneKeyRef.current = "";
+          }
           onAnimationStateChange(false);
         });
     }, 5000);
-  }, [activeOverlayScene, nextOverlayScene, onAnimationSettled, onAnimationStateChange, onMarkAttackAnimationPlayed]);
+  }, [activeOverlayScene, latestAttackSelection.staleEventIds, nextOverlayScene, onAnimationSettled, onAnimationStateChange, onMarkAttackAnimationPlayed]);
 
   useEffect(() => () => {
     if (fadeTimerRef.current) {
@@ -350,6 +386,7 @@ export function LocationCell({
     if (animationTimerRef.current) {
       window.clearTimeout(animationTimerRef.current);
     }
+    activeSceneKeyRef.current = "";
     onAnimationStateChange(false);
   }, [onAnimationStateChange]);
 
@@ -381,12 +418,24 @@ export function LocationCell({
           <div className="location-map-shell">
             <img className="location-map-image" src={resolveApiUrl(worldMapImageUrl)} alt="Valaska world map" />
             <div className="objective-overlay">
-              <strong>Adventure Objectives</strong>
-              <ul className="objective-list">
-                {(detail.tab1.active_adventure?.objectives ?? []).map((objective) => (
-                  <li key={objective.id}>{objective.description}</li>
-                ))}
-              </ul>
+              <strong>Mission Progress</strong>
+              {missionObjective?.title ? (
+                <div className="mission-progress-block">
+                  <span>{missionObjective.title}</span>
+                  <p>{missionObjective.progress_label || missionObjective.public_goal}</p>
+                  {missionObjective.complete && (
+                    <button className="btn btn-small accent" type="button" onClick={onReturnToMoosehearth}>
+                      Return to Moosehearth
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <ul className="objective-list">
+                  {(detail.tab1.active_adventure?.objectives ?? []).map((objective) => (
+                    <li key={objective.id}>{objective.description}</li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         )}
@@ -398,18 +447,29 @@ export function LocationCell({
               src={resolveApiUrl(detail.tab1.active_adventure.map_image_url)}
               alt={`${displayAdventureTitle(detail.tab1.active_adventure)} adventure map`}
             />
-            {adventureLocations.map((location) => (
-              <button
-                key={location.id}
-                type="button"
-                className={activeLocation?.id === location.id ? "gm-map-hotspot active" : "gm-map-hotspot"}
-                style={{ left: `${location.x_pct}%`, top: `${location.y_pct}%` }}
-                onClick={() => onSetActiveLocationId(location.id)}
-                aria-label={`Location ${location.number}: ${location.title}`}
-              >
-                {location.number}
-              </button>
-            ))}
+            {adventureLocations.map((location) => {
+              const travelLocked = allowedLocationIds.size > 0 && !allowedLocationIds.has(location.id);
+              return (
+                <button
+                  key={location.id}
+                  type="button"
+                  className={[
+                    "gm-map-hotspot",
+                    activeLocation?.id === location.id ? "active" : "",
+                    travelLocked ? "locked" : "",
+                  ].filter(Boolean).join(" ")}
+                  style={{ left: `${location.x_pct}%`, top: `${location.y_pct}%` }}
+                  onClick={() => {
+                    if (!travelLocked) onSetActiveLocationId(location.id);
+                  }}
+                  disabled={travelLocked}
+                  aria-label={`Location ${location.number}: ${location.title}`}
+                  title={travelLocked ? "The mission route does not allow travel here yet." : location.title}
+                >
+                  {location.number}
+                </button>
+              );
+            })}
             {selectedLocation && (
               <div className="travel-popover" style={{ left: `${selectedLocation.x_pct}%`, top: `${selectedLocation.y_pct}%` }}>
                 <strong>{selectedLocation.title}</strong>

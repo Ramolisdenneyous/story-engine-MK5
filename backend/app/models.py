@@ -46,6 +46,7 @@ class EventKind(str, enum.Enum):
     OPPOSITION_SPAWNED = "opposition_spawned"
     MONSTER_DIED = "monster_died"
     OPPOSITION_DISMISSED = "opposition_dismissed"
+    OBJECTIVE_UPDATED = "objective_updated"
 
 
 class MemoryBlockType(str, enum.Enum):
@@ -65,8 +66,11 @@ class Session(Base):
     last_summarized_prompt_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     narrative_agent_definition_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
     current_location_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    current_location_id: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    current_location_name: Mapped[str] = mapped_column(String(240), default="", nullable=False)
     combat_state: Mapped[dict] = mapped_column(json_type(), default=dict, nullable=False)
     opposition_state: Mapped[dict] = mapped_column(json_type(), default=dict, nullable=False)
+    mission_objective_state: Mapped[dict] = mapped_column(json_type(), default=dict, nullable=False)
     generated_image: Mapped[dict] = mapped_column(json_type(), default=dict, nullable=False)
     selected_narrative_player_id: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

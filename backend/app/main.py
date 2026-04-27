@@ -49,6 +49,7 @@ from .services import (
     lock_tab1,
     prompt_agent,
     reset_session,
+    return_to_moosehearth,
     roll_dice_batch_for_session,
     roll_dice_for_session,
     roll_initiative,
@@ -90,8 +91,11 @@ def _ensure_schema() -> None:
     with engine.begin() as conn:
         statements = [
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS current_location_text TEXT DEFAULT '' NOT NULL",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS current_location_id VARCHAR(120) DEFAULT '' NOT NULL",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS current_location_name VARCHAR(240) DEFAULT '' NOT NULL",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS combat_state JSON DEFAULT '{}' NOT NULL",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS opposition_state JSON DEFAULT '{}' NOT NULL",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS mission_objective_state JSON DEFAULT '{}' NOT NULL",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS generated_image JSON DEFAULT '{}' NOT NULL",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS selected_narrative_player_id VARCHAR(120) DEFAULT '' NOT NULL",
             "ALTER TABLE tab1_inputs ADD COLUMN IF NOT EXISTS preset_id VARCHAR(120) DEFAULT '' NOT NULL",
@@ -112,6 +116,7 @@ def _ensure_schema() -> None:
             "ALTER TYPE eventkind ADD VALUE IF NOT EXISTS 'OPPOSITION_SPAWNED'",
             "ALTER TYPE eventkind ADD VALUE IF NOT EXISTS 'MONSTER_DIED'",
             "ALTER TYPE eventkind ADD VALUE IF NOT EXISTS 'OPPOSITION_DISMISSED'",
+            "ALTER TYPE eventkind ADD VALUE IF NOT EXISTS 'OBJECTIVE_UPDATED'",
         ]
         for statement in enum_statements:
             try:
@@ -140,6 +145,9 @@ def _session_summary(session) -> SessionSummary:
         combat_state=CombatStateOut(**(session.combat_state or {"in_combat": False, "round": 1, "turn_index": 0, "initiative_order": [], "initiative_values": {}})),
         selected_narrative_player_id=session.selected_narrative_player_id or "",
         opposition_state=(session.opposition_state or None),
+        current_location_id=session.current_location_id or "",
+        current_location_name=session.current_location_name or "",
+        mission_objective_state=session.mission_objective_state or {},
     )
 
 
@@ -293,6 +301,14 @@ def travel_endpoint(session_id: str, payload: TravelRequest, db: Session = Depen
         return _session_summary(
             travel_to_location(db, session_id, payload.location_id, payload.location_name, payload.location_description)
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/session/{session_id}/return-to-moosehearth", response_model=SessionSummary)
+def return_to_moosehearth_endpoint(session_id: str, db: Session = Depends(get_db)):
+    try:
+        return _session_summary(return_to_moosehearth(db, session_id))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

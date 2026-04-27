@@ -59,6 +59,7 @@ type AdventureTabProps = {
   onSetLocationView: (view: LocationView) => void;
   onSetActiveLocationId: (locationId: string) => void;
   onTravelToSelectedLocation: () => void;
+  onReturnToMoosehearth: () => void;
   onOpenEncounterModal: () => void;
   onCloseEncounterModal: () => void;
   onSetEncounterMonsterId: (monsterId: string) => void;
@@ -87,6 +88,7 @@ export function AdventureTab(props: AdventureTabProps) {
         onSetActiveLocationId={props.onSetActiveLocationId}
         onSetLocationView={props.onSetLocationView}
         onTravelToSelectedLocation={props.onTravelToSelectedLocation}
+        onReturnToMoosehearth={props.onReturnToMoosehearth}
         displayAdventureTitle={props.displayAdventureTitle}
         encounterLocationTitle={props.encounterLocationTitle}
         playedAttackEventIds={props.playedAttackEventIds}

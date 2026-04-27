@@ -6,3 +6,5 @@
 node_modules/
 dist/
 .env
+*.tsbuildinfo
+frontend/src/**/*.js

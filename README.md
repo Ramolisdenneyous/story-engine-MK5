@@ -28,6 +28,8 @@ The work in this chat cycle pushed the project toward:
 - card-based party and opposition presentation in the Encounter Location view
 - frontend combat overlays and death animation support driven by backend events
 - stronger guardrails around invalid tool calls and stale combat targets
+- opposition batch-action stability improvements (deduped action and event handling)
+- completed Phase 7 mission-objective integration across all six adventures
 
 ## Major Architecture Changes
 
@@ -71,8 +73,21 @@ It currently:
 - returns viable live targets to the LLM when a target is invalid
 - allows the model to retry the tool call instead of narrating a broken action
 - rejects an entire invalid batch rather than partially applying half a turn
+- canonicalizes opposition attack abilities to real monster profiles to prevent false no-roll misses
+- deduplicates repeated action/state emissions before event persistence
 
 This is especially important for multi-monster combat and stale target references.
+
+### Frontend Sync Hardening
+
+Combat overlays are now protected against replay loops and stale backlog replays:
+
+- only the newest unresolved attack prompt group is animated
+- stale unresolved attack events are marked handled without replaying history
+- duplicate attack entries in the same prompt group are filtered before render
+- post-animation refresh remains backend-truth-first
+
+TTS playback also includes timeout and abort recovery behavior so rapid prompting cannot wedge autoplay in a loading state.
 
 ## Current UI Structure
 
@@ -153,6 +168,7 @@ This event trail allows the frontend to:
 - animate attacks from backend-resolved outcomes
 - refresh against the latest session state after animation settles
 - keep the real UI anchored to persisted state instead of transient frontend guesses
+- avoid replaying old encounters after travel, spawn, or dismissal transitions
 
 ## Local Assets
 
@@ -261,12 +277,19 @@ Recent testing has focused heavily on:
 - frontend/backend sync after attack sequences
 - invalid target handling in tool calls
 
+Phase 7 validation now includes full quest-line playthrough checks for:
+- To Follow the King's Way
+- Nightmares of the Thawed
+- The Dead Remember
+- Collecting What's Owed
+- Memories of the Witch King
+- Blood at Midnight
+
 ## Known Constraints
 
 MK4 is still an active development branch of the project.
 
 Known constraints include:
-- combat behavior still needs more live testing
 - animation polish is still iterative
 - model behavior still needs guardrails for tool accuracy
 - the README reflects the current architecture, but the project is still evolving quickly

@@ -39,6 +39,7 @@ const TTS_STATUS_LABELS = {
 } as const satisfies Record<TtsState, string>;
 
 const MUSIC_VOLUME = 0.015;
+const TTS_REQUEST_TIMEOUT_MS = 25000;
 const TTS_PLAYER_GAIN: Record<string, number> = {
   Beau: 1,
   Joe: 1,
@@ -49,6 +50,41 @@ const TTS_PLAYER_GAIN: Record<string, number> = {
   Tammey: 1.35,
   Jannet: 1.35,
 };
+
+const TUTORIAL_VIDEO_URL = import.meta.env.VITE_TUTORIAL_VIDEO_URL ?? "";
+
+function youtubeEmbedUrl(rawUrl: string) {
+  const value = rawUrl.trim();
+  if (!value) return "";
+  const buildEmbedUrl = (videoId: string) => {
+    const embedUrl = new URL(`https://www.youtube-nocookie.com/embed/${videoId}`);
+    embedUrl.searchParams.set("controls", "0");
+    embedUrl.searchParams.set("rel", "0");
+    embedUrl.searchParams.set("playsinline", "1");
+    embedUrl.searchParams.set("modestbranding", "1");
+    embedUrl.searchParams.set("iv_load_policy", "3");
+    return embedUrl.toString();
+  };
+  try {
+    const parsed = new URL(value);
+    const host = parsed.hostname.replace(/^www\./, "");
+    if (host === "youtu.be") {
+      const videoId = parsed.pathname.split("/").filter(Boolean)[0] ?? "";
+      return videoId ? buildEmbedUrl(videoId) : "";
+    }
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+      if (parsed.pathname.startsWith("/embed/")) {
+        const videoId = parsed.pathname.split("/").filter(Boolean)[1] ?? "";
+        return videoId ? buildEmbedUrl(videoId) : "";
+      }
+      const videoId = parsed.searchParams.get("v") ?? "";
+      return videoId ? buildEmbedUrl(videoId) : "";
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
 
 function sanitizeVisibleAgentText(text: string) {
   return text
@@ -163,6 +199,7 @@ export function App() {
   const [playedAttackEventIds, setPlayedAttackEventIds] = useState<string[]>([]);
   const [animationLocked, setAnimationLocked] = useState(false);
   const [promptNarrationPending, setPromptNarrationPending] = useState(false);
+  const [splashOpen, setSplashOpen] = useState(() => window.localStorage.getItem("story-engine-mk4-splash-seen") !== "true");
 
   async function refresh(id = sessionId) {
     const data = await api<SessionDetail>(`/session/${id}`);
@@ -273,7 +310,7 @@ export function App() {
   const transcript = useMemo(() => {
     if (!detail) return [];
     return detail.events
-      .filter((event) => event.kind === "transcript")
+      .filter((event) => event.kind === "transcript" || event.kind === "objective_updated")
       .map((event) => ({ ...event, text: sanitizeVisibleAgentText(event.text) }))
       .filter((event) => event.text.trim());
   }, [detail]);
@@ -473,6 +510,11 @@ export function App() {
 
     stopSpeechPlayback();
     const controller = new AbortController();
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, TTS_REQUEST_TIMEOUT_MS);
     speechAbortRef.current = controller;
     setTtsError("");
     setTtsState("loading");
@@ -502,11 +544,16 @@ export function App() {
       setTtsState("playing");
     } catch (e) {
       if ((e as Error).name === "AbortError") {
+        setTtsState("idle");
+        if (timedOut) {
+          setTtsError("Text-to-speech timed out. Please try again.");
+        }
         return;
       }
       setTtsError((e as Error).message);
       setTtsState("idle");
     } finally {
+      window.clearTimeout(timeoutId);
       if (speechAbortRef.current === controller) {
         speechAbortRef.current = null;
       }
@@ -717,6 +764,24 @@ export function App() {
     }
   }
 
+  async function returnToMoosehearth() {
+    if (!sessionId) return;
+    setTravelLoading(true);
+    setError("");
+    try {
+      const sessionSummary = await api<SessionDetail["session"]>(`/session/${sessionId}/return-to-moosehearth`, { method: "POST" });
+      setDetail((current) => (current ? { ...current, session: sessionSummary } : current));
+      await refresh();
+      setEncounterLocationTitle("EndGame Antlers Rest Inn");
+      setLocationView("encounter");
+      setActiveLocationId("");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setTravelLoading(false);
+    }
+  }
+
   function cycleEncounterMonster(direction: "previous" | "next") {
     if (!gmMonsters.length) return;
     const currentIndex = gmMonsters.findIndex((monster) => monster.monster_id === encounterMonsterId);
@@ -738,7 +803,6 @@ export function App() {
           quantity: encounterQuantity,
         }),
       });
-      setPlayedAttackEventIds([]);
       const refreshed = await refresh();
       setEncounterModalOpen(false);
       setLocationView("encounter");
@@ -756,7 +820,6 @@ export function App() {
     setError("");
     try {
       await api(`/session/${sessionId}/dismiss-opposition`, { method: "POST" });
-      setPlayedAttackEventIds([]);
       const refreshed = await refresh();
       if (activeAgentSlot === OPPOSITION_SLOT) {
         setActiveAgentSlot(selectableAgentSlotsForDetail(refreshed)[0] ?? 1);
@@ -805,12 +868,56 @@ export function App() {
     window.location.reload();
   }
 
+  function enterApp() {
+    window.localStorage.setItem("story-engine-mk4-splash-seen", "true");
+    setSplashOpen(false);
+  }
+
+  function replaySplash() {
+    setSplashOpen(true);
+  }
+
   if (!catalogBoot || !detail) {
     return <div className="loading-shell">Loading Story Engine MK4...</div>;
   }
 
+  const tutorialEmbedUrl = youtubeEmbedUrl(TUTORIAL_VIDEO_URL);
+
   return (
     <div className="page">
+      {splashOpen && (
+        <div className="splash-overlay" role="dialog" aria-modal="true" aria-label="Story Engine tutorial">
+          <div className="splash-card splash-card--tutorial">
+            <div className="splash-copy">
+              <div className="eyebrow">Story Engine MK4</div>
+              <h1>Welcome to Valaska</h1>
+              <p>Watch the quick tutorial, then enter the adventure console to choose a mission, build the party, and begin play.</p>
+            </div>
+            <div className="tutorial-video-frame">
+              {tutorialEmbedUrl ? (
+                <iframe
+                  src={tutorialEmbedUrl}
+                  title="Story Engine MK4 tutorial video"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                />
+              ) : (
+                <div className="tutorial-video-placeholder">
+                  <strong>Tutorial video not configured</strong>
+                  <span>Set VITE_TUTORIAL_VIDEO_URL to a YouTube link and rebuild the frontend container.</span>
+                </div>
+              )}
+            </div>
+            <div className="splash-legal-placeholder">
+              Legal and advertising notices will live here before public release.
+            </div>
+            <div className="action-row">
+              <button className="btn accent" type="button" onClick={enterApp}>Enter Story Engine</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <audio
         ref={audioRef}
         key={currentTrack}
@@ -838,6 +945,9 @@ export function App() {
               </button>
               <button className="btn music-btn" type="button" onClick={toggleMusicMuted}>
                 {musicMuted ? "Unmute" : "Mute"}
+              </button>
+              <button className="btn music-btn" type="button" onClick={replaySplash}>
+                Tutorial
               </button>
             </div>
           </div>
@@ -914,7 +1024,7 @@ export function App() {
           onAnimationSettled={refresh}
           onMarkAttackAnimationPlayed={(eventId) => {
             setPlayedAttackEventIds((current) => (
-              current.includes(eventId) ? current : [...current.slice(-23), eventId]
+              current.includes(eventId) ? current : [...current, eventId]
             ));
           }}
           onToggleTtsAutoPlay={toggleTtsAutoPlay}
@@ -926,6 +1036,7 @@ export function App() {
           onSetLocationView={setLocationView}
           onSetActiveLocationId={setActiveLocationId}
           onTravelToSelectedLocation={() => void travelToSelectedLocation()}
+          onReturnToMoosehearth={() => void returnToMoosehearth()}
           onOpenEncounterModal={() => setEncounterModalOpen(true)}
           onCloseEncounterModal={() => setEncounterModalOpen(false)}
           onSetEncounterMonsterId={setEncounterMonsterId}

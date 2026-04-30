@@ -19,6 +19,9 @@ type GmPromptPanelProps = {
   onSetActiveAgentSlot: (slot: number) => void;
   onSubmitPrompt: (event: FormEvent) => void;
   onSetUserPrompt: (value: string) => void;
+  starterPromptText: string;
+  onSubmitStarterPrompt: () => void;
+  onDismissStarterPrompt: () => void;
   onTakeLongRest: () => void;
   onOpenEncounterModal: () => void;
   onCloseEncounterModal: () => void;
@@ -54,6 +57,9 @@ export function GmPromptPanel({
   onSetActiveAgentSlot,
   onSubmitPrompt,
   onSetUserPrompt,
+  starterPromptText,
+  onSubmitStarterPrompt,
+  onDismissStarterPrompt,
   onTakeLongRest,
   onOpenEncounterModal,
   onCloseEncounterModal,
@@ -74,10 +80,15 @@ export function GmPromptPanel({
     && !animationLocked
     && (activeAgentSlot !== OPPOSITION_SLOT || Boolean(activeOpposition?.active));
   const encounterButtonLabel = activeOpposition?.active ? "Flee Encounter" : "Trigger Encounter";
+  const showStarterPrompt = Boolean(starterPromptText && canPrompt && !userPrompt.trim() && !loading);
 
   return (
     <>
-      <article className="card prompt-shell" style={{ borderColor: SLOT_COLORS[activeAgentSlot] ?? "var(--border-strong)" }}>
+      <article
+        className="card prompt-shell"
+        style={{ borderColor: SLOT_COLORS[activeAgentSlot] ?? "var(--border-strong)" }}
+        onClick={showStarterPrompt ? onDismissStarterPrompt : undefined}
+      >
         <div className="card-head">
           <span>Guide the Party</span>
           <h2>Game Master Prompting</h2>
@@ -111,20 +122,35 @@ export function GmPromptPanel({
           )}
         </div>
         <form onSubmit={onSubmitPrompt} className="prompt-form">
-          <textarea
-            value={userPrompt}
-            onChange={(event) => onSetUserPrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                if (canPrompt && userPrompt.trim() && !loading) {
-                  event.currentTarget.form?.requestSubmit();
+          <div className="prompt-textarea-shell">
+            <textarea
+              value={userPrompt}
+              onFocus={showStarterPrompt ? onDismissStarterPrompt : undefined}
+              onChange={(event) => onSetUserPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  if (canPrompt && userPrompt.trim() && !loading) {
+                    event.currentTarget.form?.requestSubmit();
+                  }
                 }
-              }
-            }}
-            placeholder="GM prompt..."
-            disabled={!canEditPrompt}
-          />
+              }}
+              placeholder="GM prompt..."
+              disabled={!canEditPrompt}
+            />
+            {showStarterPrompt && (
+              <button
+                className="starter-prompt-bubble"
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSubmitStarterPrompt();
+                }}
+              >
+                {starterPromptText}
+              </button>
+            )}
+          </div>
           {activeMemberIsDown && <p className="inline-guidance">That agent is at 0 HP and cannot be prompted until they are healed.</p>}
           {animationLocked && <p className="inline-guidance">Resolving combat animation...</p>}
           <details className="mobile-party-details">

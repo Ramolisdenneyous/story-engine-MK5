@@ -22,6 +22,7 @@ const MUSIC_TRACKS = [
   "Cursed Village Menu.mp3",
   "Gallows of the Forgotten King.mp3",
 ].map((fileName) => resolveApiUrl(`/music/${encodeURIComponent(fileName)}`));
+const VALASKA_INTRO_AUDIO_URL = resolveApiUrl("/audio/valaska-intro.mp3");
 
 const ADVENTURE_TITLE_OVERRIDES: Record<string, string> = {
   "icebane-castle": "Memories of the Witch King",
@@ -51,6 +52,7 @@ const TTS_PLAYER_GAIN: Record<string, number> = {
   Jannet: 1.35,
 };
 
+const STARTER_PROMPT = "Party leader, you know this mission, what is your plan?";
 const DEFAULT_TUTORIAL_VIDEO_URL = "https://www.youtube.com/watch?v=eJarez0LH-E";
 const TUTORIAL_VIDEO_URL = import.meta.env.VITE_TUTORIAL_VIDEO_URL || DEFAULT_TUTORIAL_VIDEO_URL;
 
@@ -154,6 +156,7 @@ function locationImageUrl(title: string) {
 
 export function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const introAudioRef = useRef<HTMLAudioElement | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const speechAudioRef = useRef<HTMLAudioElement | null>(null);
   const speechAudioContextRef = useRef<AudioContext | null>(null);
@@ -163,6 +166,7 @@ export function App() {
   const speechAbortRef = useRef<AbortController | null>(null);
   const autoPlayBaselineRef = useRef<string | null>(null);
   const narrationPollTokenRef = useRef(0);
+  const adventureTabTopRef = useRef<HTMLDivElement | null>(null);
 
   const [catalogBoot, setCatalogBoot] = useState<CatalogBoot | null>(null);
   const [adventureDetailsById, setAdventureDetailsById] = useState<Record<string, Adventure>>({});
@@ -184,7 +188,8 @@ export function App() {
   const [activeAgentSlot, setActiveAgentSlot] = useState(1);
   const [activeLocationId, setActiveLocationId] = useState("");
   const [userPrompt, setUserPrompt] = useState("");
-  const [ttsAutoPlay, setTtsAutoPlay] = useState(false);
+  const [starterPromptDismissed, setStarterPromptDismissed] = useState(false);
+  const [ttsAutoPlay, setTtsAutoPlay] = useState(true);
   const [ttsState, setTtsState] = useState<TtsState>("idle");
   const [ttsError, setTtsError] = useState("");
   const [travelLoading, setTravelLoading] = useState(false);
@@ -200,6 +205,7 @@ export function App() {
   const [playedAttackEventIds, setPlayedAttackEventIds] = useState<string[]>([]);
   const [animationLocked, setAnimationLocked] = useState(false);
   const [promptNarrationPending, setPromptNarrationPending] = useState(false);
+  const [introAudioPlayed, setIntroAudioPlayed] = useState(false);
   const [splashOpen, setSplashOpen] = useState(() => window.localStorage.getItem("story-engine-mk4-splash-seen") !== "true");
 
   async function refresh(id = sessionId) {
@@ -278,6 +284,8 @@ export function App() {
       setCatalogBoot(catalogData);
       setSessionId(created.session_id);
       setPlayedAttackEventIds([]);
+      setStarterPromptDismissed(false);
+      setIntroAudioPlayed(false);
       await refresh(created.session_id);
     } catch (e) {
       setError((e as Error).message);
@@ -359,6 +367,16 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const introAudio = new Audio(VALASKA_INTRO_AUDIO_URL);
+    introAudio.preload = "auto";
+    introAudioRef.current = introAudio;
+    return () => {
+      introAudio.pause();
+      introAudioRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
     audio.load();
@@ -398,6 +416,29 @@ export function App() {
       return firstMonsterId(detail?.gm_monsters ?? []);
     });
   }, [detail?.gm_monsters]);
+
+  useEffect(() => {
+    if (tab !== 2 || splashOpen) return;
+    const alignAdventureTop = () => {
+      adventureTabTopRef.current?.scrollIntoView({ behavior: "auto", block: "start" });
+    };
+    const frameId = window.requestAnimationFrame(alignAdventureTop);
+    const settleTimerId = window.setTimeout(alignAdventureTop, 600);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(settleTimerId);
+    };
+  }, [splashOpen, tab]);
+
+  useEffect(() => {
+    if (tab !== 2 || splashOpen || introAudioPlayed || !detail?.session.tab1_locked) return;
+    const introAudio = introAudioRef.current;
+    if (!introAudio) return;
+    introAudio.currentTime = 0;
+    introAudio.volume = 1;
+    setIntroAudioPlayed(true);
+    void introAudio.play().catch(() => undefined);
+  }, [detail?.session.tab1_locked, introAudioPlayed, splashOpen, tab]);
 
   async function toggleMusicPlayback() {
     const audio = audioRef.current;
@@ -479,6 +520,13 @@ export function App() {
     setTtsState("idle");
   }
 
+  function stopIntroAudio() {
+    const introAudio = introAudioRef.current;
+    if (!introAudio) return;
+    introAudio.pause();
+    introAudio.currentTime = 0;
+  }
+
   async function ensureSpeechGainChain() {
     if (!speechAudioRef.current) {
       speechAudioRef.current = new Audio();
@@ -542,6 +590,7 @@ export function App() {
       speechAudioRef.current.volume = 1;
       speechAudioRef.current.src = objectUrl;
       await speechAudioRef.current.play();
+      stopIntroAudio();
       setTtsState("playing");
     } catch (e) {
       if ((e as Error).name === "AbortError") {
@@ -669,6 +718,8 @@ export function App() {
       setDetail((current) => (current ? { ...current, session: sessionSummary, tab1: tab1Data } : current));
       setTab(2);
       setPlayedAttackEventIds([]);
+      setStarterPromptDismissed(false);
+      setIntroAudioPlayed(false);
       void refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -678,26 +729,26 @@ export function App() {
     }
   }
 
-  async function submitPrompt(event: FormEvent) {
-    event.preventDefault();
-    if (!sessionId || !userPrompt.trim() || !detail || promptNarrationPending) return;
-    if (!selectableAgentSlotsForDetail(detail).includes(activeAgentSlot)) return;
+  async function sendPromptToAgent(agentSlot: number, text: string) {
+    if (!sessionId || !text.trim() || !detail || promptNarrationPending) return;
+    if (!selectableAgentSlotsForDetail(detail).includes(agentSlot)) return;
     setLoading(true);
     setError("");
     try {
       const response = await api<PromptResponse>(`/session/${sessionId}/prompt`, {
         method: "POST",
-        body: JSON.stringify({ agent_slot: activeAgentSlot, user_text: userPrompt }),
+        body: JSON.stringify({ agent_slot: agentSlot, user_text: text.trim() }),
       });
       const nextDetail = mergePromptEvents(detail, response);
       setDetail(nextDetail);
       setUserPrompt("");
+      setStarterPromptDismissed(true);
       if (nextDetail) {
-        setActiveAgentSlot(nextSelectableSlot(nextDetail, activeAgentSlot));
+        setActiveAgentSlot(nextSelectableSlot(nextDetail, agentSlot));
       }
       if (response.narration_pending) {
         setPromptNarrationPending(true);
-        void waitForPromptNarration(response.user_event.prompt_index, activeAgentSlot, sessionId).catch((pollError: Error) => {
+        void waitForPromptNarration(response.user_event.prompt_index, agentSlot, sessionId).catch((pollError: Error) => {
           setPromptNarrationPending(false);
           setError(pollError.message);
         });
@@ -709,6 +760,19 @@ export function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function submitPrompt(event: FormEvent) {
+    event.preventDefault();
+    await sendPromptToAgent(activeAgentSlot, userPrompt);
+  }
+
+  async function submitStarterPrompt() {
+    if (!detail) return;
+    const firstPlayerSlot = detail.tab1.selected_agent_slots.find((slot) => slot !== OPPOSITION_SLOT) ?? detail.tab1.party[0]?.slot ?? 1;
+    setActiveAgentSlot(firstPlayerSlot);
+    setStarterPromptDismissed(true);
+    await sendPromptToAgent(firstPlayerSlot, STARTER_PROMPT);
   }
 
   async function endChapter() {
@@ -856,6 +920,8 @@ export function App() {
     try {
       await api(`/session/${sessionId}/reset`, { method: "POST" });
       setPlayedAttackEventIds([]);
+      setStarterPromptDismissed(false);
+      setIntroAudioPlayed(false);
       await refresh();
       setTab(1);
     } catch (e) {
@@ -883,6 +949,13 @@ export function App() {
   }
 
   const tutorialEmbedUrl = youtubeEmbedUrl(TUTORIAL_VIDEO_URL);
+  const showStarterPrompt = Boolean(
+    detail.session.state === "ACTIVE"
+    && detail.session.prompt_index === 0
+    && !userPrompt.trim()
+    && !promptNarrationPending
+    && !starterPromptDismissed,
+  );
 
   return (
     <div className="page">
@@ -1001,66 +1074,71 @@ export function App() {
       )}
 
       {tab === 2 && (
-        <AdventureTab
-          detail={detail}
-          transcript={transcript}
-          transcriptChars={transcriptChars}
-          transcriptRef={transcriptRef}
-          latestEligibleReply={latestEligibleReply}
-          ttsState={ttsState}
-          ttsAutoPlay={ttsAutoPlay}
-          ttsStatusLabels={TTS_STATUS_LABELS}
-          ttsError={ttsError}
-          userPrompt={userPrompt}
-          activeAgentSlot={activeAgentSlot}
-          activeOpposition={activeOpposition}
-          locationOppositionState={oppositionState}
-          activeLocation={activeLocation}
-          adventureLocations={adventureLocations}
-          gmMonsters={gmMonsters}
-          encounterModalOpen={encounterModalOpen}
-          encounterMonsterId={encounterMonsterId}
-          encounterMonsterIndex={encounterMonsterIndex}
-          encounterQuantity={encounterQuantity}
-          selectedEncounterMonster={selectedEncounterMonster}
-          loading={loading || spawnLoading || dismissLoading || promptNarrationPending}
-          longRestLoading={longRestLoading}
-          travelLoading={travelLoading}
-          allPlayersDown={allPlayersDown}
-          worldMapImageUrl={catalogBoot.map_image_url}
-          encounterImageUrl={encounterLocationImageUrl}
-          encounterLocationTitle={encounterLocationTitle}
-          locationView={locationView}
-          playedAttackEventIds={playedAttackEventIds}
-          animationLocked={animationLocked}
-          onPlayReply={() => void playReply()}
-          onAnimationStateChange={setAnimationLocked}
-          onAnimationSettled={refresh}
-          onMarkAttackAnimationPlayed={(eventId) => {
-            setPlayedAttackEventIds((current) => (
-              current.includes(eventId) ? current : [...current, eventId]
-            ));
-          }}
-          onToggleTtsAutoPlay={toggleTtsAutoPlay}
-          onSubmitPrompt={submitPrompt}
-          onSetUserPrompt={setUserPrompt}
-          onSetActiveAgentSlot={setActiveAgentSlot}
-          onTakeLongRest={() => void takeLongRest()}
-          onEndChapter={() => void endChapter()}
-          onSetLocationView={setLocationView}
-          onSetActiveLocationId={setActiveLocationId}
-          onTravelToSelectedLocation={() => void travelToSelectedLocation()}
-          onReturnToMoosehearth={() => void returnToMoosehearth()}
-          onOpenEncounterModal={() => setEncounterModalOpen(true)}
-          onCloseEncounterModal={() => setEncounterModalOpen(false)}
-          onSetEncounterMonsterId={setEncounterMonsterId}
-          onCycleEncounterMonster={cycleEncounterMonster}
-          onSetEncounterQuantity={setEncounterQuantity}
-          onTriggerEncounter={() => void triggerEncounter()}
-          onFleeEncounter={() => void fleeEncounter()}
-          onStartOver={startOver}
-          displayAdventureTitle={displayAdventureTitle}
-        />
+        <div ref={adventureTabTopRef}>
+          <AdventureTab
+            detail={detail}
+            transcript={transcript}
+            transcriptChars={transcriptChars}
+            transcriptRef={transcriptRef}
+            latestEligibleReply={latestEligibleReply}
+            ttsState={ttsState}
+            ttsAutoPlay={ttsAutoPlay}
+            ttsStatusLabels={TTS_STATUS_LABELS}
+            ttsError={ttsError}
+            userPrompt={userPrompt}
+            activeAgentSlot={activeAgentSlot}
+            activeOpposition={activeOpposition}
+            locationOppositionState={oppositionState}
+            activeLocation={activeLocation}
+            adventureLocations={adventureLocations}
+            gmMonsters={gmMonsters}
+            encounterModalOpen={encounterModalOpen}
+            encounterMonsterId={encounterMonsterId}
+            encounterMonsterIndex={encounterMonsterIndex}
+            encounterQuantity={encounterQuantity}
+            selectedEncounterMonster={selectedEncounterMonster}
+            loading={loading || spawnLoading || dismissLoading || promptNarrationPending}
+            longRestLoading={longRestLoading}
+            travelLoading={travelLoading}
+            allPlayersDown={allPlayersDown}
+            worldMapImageUrl={catalogBoot.map_image_url}
+            encounterImageUrl={encounterLocationImageUrl}
+            encounterLocationTitle={encounterLocationTitle}
+            locationView={locationView}
+            playedAttackEventIds={playedAttackEventIds}
+            animationLocked={animationLocked}
+            onPlayReply={() => void playReply()}
+            onAnimationStateChange={setAnimationLocked}
+            onAnimationSettled={refresh}
+            onMarkAttackAnimationPlayed={(eventId) => {
+              setPlayedAttackEventIds((current) => (
+                current.includes(eventId) ? current : [...current, eventId]
+              ));
+            }}
+            onToggleTtsAutoPlay={toggleTtsAutoPlay}
+            onSubmitPrompt={submitPrompt}
+            onSetUserPrompt={setUserPrompt}
+            starterPromptText={showStarterPrompt ? STARTER_PROMPT : ""}
+            onSubmitStarterPrompt={() => void submitStarterPrompt()}
+            onDismissStarterPrompt={() => setStarterPromptDismissed(true)}
+            onSetActiveAgentSlot={setActiveAgentSlot}
+            onTakeLongRest={() => void takeLongRest()}
+            onEndChapter={() => void endChapter()}
+            onSetLocationView={setLocationView}
+            onSetActiveLocationId={setActiveLocationId}
+            onTravelToSelectedLocation={() => void travelToSelectedLocation()}
+            onReturnToMoosehearth={() => void returnToMoosehearth()}
+            onOpenEncounterModal={() => setEncounterModalOpen(true)}
+            onCloseEncounterModal={() => setEncounterModalOpen(false)}
+            onSetEncounterMonsterId={setEncounterMonsterId}
+            onCycleEncounterMonster={cycleEncounterMonster}
+            onSetEncounterQuantity={setEncounterQuantity}
+            onTriggerEncounter={() => void triggerEncounter()}
+            onFleeEncounter={() => void fleeEncounter()}
+            onStartOver={startOver}
+            displayAdventureTitle={displayAdventureTitle}
+          />
+        </div>
       )}
 
       {tab === 3 && (

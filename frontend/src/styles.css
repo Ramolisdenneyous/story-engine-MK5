@@ -448,6 +448,30 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .prompt-form { display: grid; gap: 14px; }
 .prompt-form textarea { min-height: 140px; resize: vertical; }
+.prompt-textarea-shell {
+  position: relative;
+}
+
+.starter-prompt-bubble {
+  position: absolute;
+  left: 16px;
+  top: 14px;
+  max-width: calc(100% - 32px);
+  padding: 10px 13px;
+  border: 1px solid rgba(113, 183, 255, 0.64);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(113, 183, 255, 0.92), rgba(156, 230, 255, 0.92));
+  color: #07111b;
+  box-shadow: 0 14px 28px rgba(3, 8, 15, 0.32);
+  cursor: pointer;
+  font: 800 0.92rem/1.35 "Trebuchet MS", sans-serif;
+  text-align: left;
+}
+
+.starter-prompt-bubble:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+}
 
 .split-row { justify-content: space-between; }
 .end-button { margin-left: auto; }
@@ -2247,6 +2271,16 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
     font-size: 16px;
   }
 
+  .starter-prompt-bubble {
+    left: 12px;
+    top: 11px;
+    max-width: calc(100% - 24px);
+    padding: 8px 10px;
+    border-radius: 13px;
+    font-size: 0.76rem;
+    line-height: 1.25;
+  }
+
   .prompt-shell .card-head {
     display: none;
   }
@@ -2282,11 +2316,18 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   }
 
   .prompt-form {
-    gap: 10px;
+    gap: 8px;
   }
 
   .prompt-form .action-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .prompt-shell .btn {
+    min-height: 38px;
+    padding: 8px 10px;
+    font-size: 0.74rem;
   }
 
   .mobile-party-details {
@@ -2297,10 +2338,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .mobile-party-details summary {
     display: block;
-    padding: 10px 12px;
+    padding: 8px 10px;
     color: var(--text-muted);
     cursor: pointer;
-    font: 700 12px/1 "Trebuchet MS", sans-serif;
+    font: 700 11px/1 "Trebuchet MS", sans-serif;
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
@@ -2382,5 +2423,34 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .encounter-stack-card--mid {
     height: 246px;
+  }
+}
+
+@media (max-width: 390px) {
+  .prompt-form textarea {
+    min-height: 82px;
+  }
+
+  .starter-prompt-bubble {
+    left: 10px;
+    top: 10px;
+    max-width: calc(100% - 20px);
+    padding: 7px 9px;
+    font-size: 0.68rem;
+  }
+
+  .prompt-shell .btn {
+    min-height: 34px;
+    padding: 6px 8px;
+    font-size: 0.68rem;
+  }
+
+  .prompt-form .action-row {
+    gap: 6px;
+  }
+
+  .mobile-party-details summary {
+    padding: 7px 9px;
+    font-size: 0.64rem;
   }
 }

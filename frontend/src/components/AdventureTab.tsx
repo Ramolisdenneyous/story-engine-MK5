@@ -53,6 +53,9 @@ type AdventureTabProps = {
   onToggleTtsAutoPlay: () => void;
   onSubmitPrompt: (event: FormEvent) => void;
   onSetUserPrompt: (value: string) => void;
+  starterPromptText: string;
+  onSubmitStarterPrompt: () => void;
+  onDismissStarterPrompt: () => void;
   onSetActiveAgentSlot: (slot: number) => void;
   onTakeLongRest: () => void;
   onEndChapter: () => void;
@@ -130,6 +133,9 @@ export function AdventureTab(props: AdventureTabProps) {
         onSetActiveAgentSlot={props.onSetActiveAgentSlot}
         onSubmitPrompt={props.onSubmitPrompt}
         onSetUserPrompt={props.onSetUserPrompt}
+        starterPromptText={props.starterPromptText}
+        onSubmitStarterPrompt={props.onSubmitStarterPrompt}
+        onDismissStarterPrompt={props.onDismissStarterPrompt}
         onTakeLongRest={props.onTakeLongRest}
         onOpenEncounterModal={props.onOpenEncounterModal}
         onCloseEncounterModal={props.onCloseEncounterModal}

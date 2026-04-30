@@ -85,6 +85,10 @@ MUSIC_PATH = Path("/app/docs/music")
 if MUSIC_PATH.exists():
     app.mount("/music", StaticFiles(directory=MUSIC_PATH), name="music")
 
+AUDIO_PATH = Path("/app/docs/audio")
+if AUDIO_PATH.exists():
+    app.mount("/audio", StaticFiles(directory=AUDIO_PATH), name="audio")
+
 
 def _ensure_schema() -> None:
     Base.metadata.create_all(bind=engine)

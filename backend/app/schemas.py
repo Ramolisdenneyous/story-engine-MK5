@@ -121,6 +121,7 @@ class CombatStateOut(BaseModel):
     turn_index: int
     initiative_order: list[str]
     initiative_values: dict[str, int]
+    acted_this_round: dict[str, bool] = Field(default_factory=dict)
 
 
 class OppositionMonsterInstanceOut(BaseModel):
@@ -154,6 +155,7 @@ class SessionSummary(BaseModel):
     opposition_state: OppositionStateOut | None = None
     current_location_id: str = ""
     current_location_name: str = ""
+    encounter_state: dict = Field(default_factory=dict)
     mission_objective_state: dict = Field(default_factory=dict)
 
 
@@ -181,6 +183,22 @@ class TravelRequest(BaseModel):
 class OppositionSpawnRequest(BaseModel):
     monster_type: str
     quantity: int = Field(ge=1, le=4)
+
+
+class EncounterSearchRequest(BaseModel):
+    agent_slot: int
+    skill: str = "Perception"
+
+
+class HazardChallengeRequest(BaseModel):
+    agent_slot: int
+    skill: str = ""
+
+
+class UseItemRequest(BaseModel):
+    agent_slot: int
+    item_name: str
+    target_id: str = ""
 
 
 class EventOut(BaseModel):

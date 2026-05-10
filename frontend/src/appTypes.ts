@@ -75,6 +75,7 @@ export type CombatState = {
   turn_index: number;
   initiative_order: string[];
   initiative_values: Record<string, number>;
+  acted_this_round: Record<string, boolean>;
 };
 
 export type OppositionMonsterInstance = {
@@ -102,6 +103,24 @@ export type MissionObjectiveState = {
   gold_collected?: number;
   target_gold?: number;
   updates?: Array<{ prompt_index: number; text: string }>;
+};
+
+export type EncounterState = {
+  adventure_id?: string;
+  location_id?: string;
+  location_name?: string;
+  encounter_type?: string;
+  encounter_name?: string;
+  active?: boolean;
+  repeatable?: boolean;
+  status?: string;
+  hazard?: Record<string, unknown>;
+  search?: {
+    available?: boolean;
+    found?: boolean;
+    loot?: string[];
+  };
+  dropped_loot?: string[];
 };
 
 export type OppositionState = {
@@ -172,6 +191,7 @@ export type SessionDetail = {
     opposition_state?: OppositionState | null;
     current_location_id: string;
     current_location_name: string;
+    encounter_state: EncounterState;
     mission_objective_state: MissionObjectiveState;
   };
   tab1: {

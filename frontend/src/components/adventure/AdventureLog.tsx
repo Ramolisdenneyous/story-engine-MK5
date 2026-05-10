@@ -26,6 +26,12 @@ export function AdventureLog({
   onPlayReply,
   onToggleTtsAutoPlay,
 }: AdventureLogProps) {
+  const lineClass = (event: TranscriptEvent) => {
+    if (event.kind === "objective_updated") return "transcript-line transcript-line--objective";
+    if (event.kind === "inventory_gained" || event.kind === "inventory_lost") return "transcript-line transcript-line--inventory";
+    return "transcript-line";
+  };
+
   return (
     <article className="card transcript-card transcript-card--flat">
       <div className="card-head">
@@ -50,7 +56,7 @@ export function AdventureLog({
         {transcript.map((event) => (
           <div
             key={event.event_id}
-            className={event.kind === "objective_updated" ? "transcript-line transcript-line--objective" : "transcript-line"}
+            className={lineClass(event)}
             style={{ color: event.role === "agent" && event.agent_slot ? SLOT_COLORS[event.agent_slot] : "var(--text-primary)" }}
           >
             {event.text}

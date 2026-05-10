@@ -72,6 +72,8 @@ type AdventureTabProps = {
   onSetEncounterQuantity: (quantity: number) => void;
   onTriggerEncounter: () => void;
   onFleeEncounter: () => void;
+  onSearchLocation: () => void;
+  onUseItem: (itemName: string) => void;
   onStartOver: () => void;
   displayAdventureTitle: (adventure: Adventure | null) => string;
 };
@@ -148,6 +150,8 @@ export function AdventureTab(props: AdventureTabProps) {
         onSetEncounterQuantity={props.onSetEncounterQuantity}
         onTriggerEncounter={props.onTriggerEncounter}
         onFleeEncounter={props.onFleeEncounter}
+        onSearchLocation={props.onSearchLocation}
+        onUseItem={props.onUseItem}
         onEndChapter={props.onEndChapter}
         gameOver={props.allPlayersDown}
         onStartOver={props.onStartOver}

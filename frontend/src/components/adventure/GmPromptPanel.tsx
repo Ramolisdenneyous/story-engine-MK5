@@ -33,6 +33,8 @@ type GmPromptPanelProps = {
   onSetEncounterQuantity: (quantity: number) => void;
   onTriggerEncounter: () => void;
   onFleeEncounter: () => void;
+  onSearchLocation: () => void;
+  onUseItem: (itemName: string) => void;
   onEndChapter: () => void;
   gameOver: boolean;
   onStartOver: () => void;
@@ -41,6 +43,31 @@ type GmPromptPanelProps = {
 function agentTooltip(member: SessionDetail["tab1"]["party"][number]) {
   const inventory = member.inventory.length ? member.inventory.join(", ") : "No listed inventory";
   return `HP ${member.hp_current}/${member.hp_max} | Inventory: ${inventory}`;
+}
+
+function activeCombatantIdForDetail(detail: SessionDetail): string {
+  const combat = detail.session.combat_state;
+  const order = combat.initiative_order;
+  if (!combat.in_combat || !order.length) return "";
+  const livingIds = new Set<string>();
+  detail.tab1.party.forEach((member) => {
+    if (member.hp_current > 0) livingIds.add(`pc:${member.slot}`);
+  });
+  if (detail.session.opposition_state?.active) livingIds.add("opp:12");
+  if (!livingIds.size) return "";
+  const acted = { ...combat.acted_this_round };
+  const livingOrder = order.filter((combatantId) => livingIds.has(combatantId));
+  if (livingOrder.length && livingOrder.every((combatantId) => acted[combatantId])) {
+    Object.keys(acted).forEach((combatantId) => {
+      delete acted[combatantId];
+    });
+  }
+  const start = Math.min(combat.turn_index, order.length - 1);
+  for (let offset = 0; offset < order.length; offset += 1) {
+    const combatantId = order[(start + offset) % order.length];
+    if (livingIds.has(combatantId) && !acted[combatantId]) return combatantId;
+  }
+  return "";
 }
 
 export function GmPromptPanel({
@@ -72,21 +99,38 @@ export function GmPromptPanel({
   onSetEncounterQuantity,
   onTriggerEncounter,
   onFleeEncounter,
+  onSearchLocation,
+  onUseItem,
   onEndChapter,
   gameOver,
   onStartOver,
 }: GmPromptPanelProps) {
   const selectedMember = detail.tab1.party.find((member) => member.slot === activeAgentSlot) ?? null;
   const activeMemberIsDown = selectedMember ? selectedMember.hp_current <= 0 : false;
-  const canEditPrompt = detail.session.state === "ACTIVE" && !activeMemberIsDown;
+  const combatActive = detail.session.combat_state.in_combat && detail.session.combat_state.initiative_order.length > 0;
+  const activeCombatantId = combatActive ? activeCombatantIdForDetail(detail) : "";
+  const activeCombatSlot = activeCombatantId === "opp:12"
+    ? OPPOSITION_SLOT
+    : activeCombatantId.startsWith("pc:")
+      ? Number(activeCombatantId.replace("pc:", ""))
+      : 0;
+  const selectedAgentHasCombatTurn = !combatActive || activeCombatSlot === activeAgentSlot;
+  const canEditPrompt = detail.session.state === "ACTIVE" && !activeMemberIsDown && selectedAgentHasCombatTurn;
   const canPrompt = detail.session.state === "ACTIVE"
     && !activeMemberIsDown
     && !animationLocked
+    && selectedAgentHasCombatTurn
     && (activeAgentSlot !== OPPOSITION_SLOT || Boolean(activeOpposition?.active));
   const encounterButtonLabel = activeOpposition?.active ? "Flee Encounter" : "Trigger Encounter";
   const showStarterPrompt = Boolean(starterPromptText && canPrompt && !userPrompt.trim() && !loading);
   const triggerEncounterGuideActive = onboardingGuideStep === "trigger-encounter" && !activeOpposition?.active;
   const startEncounterGuideActive = onboardingGuideStep === "start-encounter";
+  const encounterState = detail.session.encounter_state ?? {};
+  const searchState = encounterState.search ?? {};
+  const usableItems = selectedMember?.inventory.filter((item) => {
+    const lowered = item.toLowerCase();
+    return lowered.includes("healing") || lowered.includes("spell restore") || lowered.includes("fireball scroll");
+  }) ?? [];
 
   return (
     <>
@@ -101,7 +145,8 @@ export function GmPromptPanel({
         </div>
         <div className={activeOpposition?.active ? "agent-tabs agent-tabs--combat" : "agent-tabs"}>
           {detail.tab1.party.map((member) => {
-            const disabled = member.hp_current <= 0 || animationLocked;
+            const waitingForTurn = combatActive && activeCombatSlot !== member.slot;
+            const disabled = member.hp_current <= 0 || animationLocked || waitingForTurn;
             return (
               <button
                 key={member.slot}
@@ -109,7 +154,7 @@ export function GmPromptPanel({
               style={{ background: activeAgentSlot === member.slot ? SLOT_COLORS[member.slot] : "transparent", borderColor: SLOT_COLORS[member.slot] }}
               onClick={() => onSetActiveAgentSlot(member.slot)}
               disabled={disabled}
-                title={agentTooltip(member)}
+                title={waitingForTurn ? "Waiting for this agent's initiative turn." : agentTooltip(member)}
               >
                 {member.player_name} {member.initiative ? `(${member.initiative})` : ""}
               </button>
@@ -120,8 +165,8 @@ export function GmPromptPanel({
               className={activeAgentSlot === OPPOSITION_SLOT ? "agent-chip active" : "agent-chip"}
               style={{ background: activeAgentSlot === OPPOSITION_SLOT ? SLOT_COLORS[OPPOSITION_SLOT] : "transparent", borderColor: SLOT_COLORS[OPPOSITION_SLOT] }}
               onClick={() => onSetActiveAgentSlot(OPPOSITION_SLOT)}
-              disabled={animationLocked}
-              title={activeOpposition.instances.map((instance) => `${instance.display_name}: ${instance.current_hp}/${instance.hp_max}`).join(" | ")}
+              disabled={animationLocked || (combatActive && activeCombatSlot !== OPPOSITION_SLOT)}
+              title={combatActive && activeCombatSlot !== OPPOSITION_SLOT ? "Waiting for the Opposition initiative turn." : activeOpposition.instances.map((instance) => `${instance.display_name}: ${instance.current_hp}/${instance.hp_max}`).join(" | ")}
             >
               Opposition {detail.session.combat_state.initiative_values["opp:12"] ? `(${detail.session.combat_state.initiative_values["opp:12"]})` : ""}
             </button>
@@ -158,7 +203,14 @@ export function GmPromptPanel({
             )}
           </div>
           {activeMemberIsDown && <p className="inline-guidance">That agent is at 0 HP and cannot be prompted until they are healed.</p>}
+          {!selectedAgentHasCombatTurn && <p className="inline-guidance">Waiting for the current initiative turn.</p>}
           {animationLocked && <p className="inline-guidance">Resolving combat animation...</p>}
+          {encounterState.encounter_type && encounterState.encounter_type !== "none" && (
+            <div className="encounter-status-strip">
+              <strong>{encounterState.encounter_name}</strong>
+              <span>{encounterState.encounter_type} | {encounterState.status}</span>
+            </div>
+          )}
           <details className="mobile-party-details">
             <summary>Party Status</summary>
             <div className="party-summary-list">
@@ -193,6 +245,27 @@ export function GmPromptPanel({
             >
               {longRestLoading ? "Resting..." : "Long Rest"}
             </button>
+            {searchState.available && !searchState.found && (
+              <button className="btn accent" type="button" onClick={onSearchLocation} disabled={loading || animationLocked || !canPrompt}>
+                Search Location
+              </button>
+            )}
+            {usableItems.length > 0 && (
+              <select
+                className="item-use-select"
+                value=""
+                onChange={(event) => {
+                  if (event.target.value) onUseItem(event.target.value);
+                }}
+                disabled={loading || animationLocked || !canPrompt}
+                title="Use item"
+              >
+                <option value="">Use item...</option>
+                {usableItems.map((item, index) => (
+                  <option key={`${item}-${index}`} value={item}>{item}</option>
+                ))}
+              </select>
+            )}
             <button className="btn" type="button" onClick={onEndChapter} disabled={loading || animationLocked || detail.session.state !== "ACTIVE"}>End Chapter</button>
           </div>
         </form>

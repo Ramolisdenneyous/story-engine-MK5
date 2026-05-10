@@ -1,12 +1,12 @@
-# Story Engine MK4
+# Story Engine MK5
 
-Story Engine MK4 is the current local-first evolution of the Story Engine project. It builds on the original prototype plus MK2 and MK3, but shifts the architecture toward a tighter Game Master workflow, stronger backend authority, and a much more deliberate tab-based adventure UI.
+Story Engine MK5 is the next local-first evolution of the Story Engine project. It starts from the stable MK4 live version and preserves the same GM-first gameplay core while creating room for the next round of product, UI, and engine improvements.
 
-The project is still centered on one core idea: the human user is the Game Master, and AI-controlled agents inhabit the party and respond inside a structured game loop. MK4 focuses on making that loop feel clearer, faster, and more dependable in actual play.
+The project is still centered on one core idea: the human user is the Game Master, and AI-controlled agents inhabit the party and respond inside a structured game loop. MK5 continues the work of making that loop feel clearer, faster, and more dependable in actual play.
 
-## What MK4 Is Trying To Do
+## What MK5 Is Trying To Do
 
-MK4 is not an AI GM.
+MK5 is not an AI GM.
 
 The design goal is:
 - the user directs the world as Game Master
@@ -15,11 +15,11 @@ The design goal is:
 - the frontend presents the active mission, location, party state, combat state, and transcript in a compact play surface
 - the chapter can still be summarized and rewritten into a narrative draft at the end
 
-## Current MK4 Focus
+## Current MK5 Focus
 
-This repository now reflects the current MK4 direction rather than the earlier prototype MVP.
+This repository now reflects the current MK5 direction, starting from the MK4 guided-onboarding baseline.
 
-The work in this chat cycle pushed the project toward:
+The inherited MK4 baseline pushed the project toward:
 - backend-authoritative combat resolution
 - two-phase prompt flow for faster combat feel
 - improved local docker hosting for MK4 only
@@ -187,7 +187,7 @@ Many of the location and preview images have been converted to lighter `.webp` a
 ## Repository Layout
 
 ```text
-story-engine-MK4/
+story-engine-MK5/
   backend/
     app/
     migrations/

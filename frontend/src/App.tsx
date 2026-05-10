@@ -120,8 +120,42 @@ function orderedAgentSlotsForDetail(detail: SessionDetail | null): number[] {
   return detail.tab1.selected_agent_slots;
 }
 
+function activeCombatantIdForDetail(detail: SessionDetail): string {
+  const combat = detail.session.combat_state;
+  const order = combat.initiative_order;
+  if (!combat.in_combat || !order.length) return "";
+  const livingIds = new Set<string>();
+  detail.tab1.party.forEach((member) => {
+    if (member.hp_current > 0) livingIds.add(`pc:${member.slot}`);
+  });
+  if (detail.session.opposition_state?.active) livingIds.add("opp:12");
+  if (!livingIds.size) return "";
+  const acted = { ...combat.acted_this_round };
+  const livingOrder = order.filter((combatantId) => livingIds.has(combatantId));
+  if (livingOrder.length && livingOrder.every((combatantId) => acted[combatantId])) {
+    Object.keys(acted).forEach((combatantId) => {
+      delete acted[combatantId];
+    });
+  }
+  const start = Math.min(combat.turn_index, order.length - 1);
+  for (let offset = 0; offset < order.length; offset += 1) {
+    const combatantId = order[(start + offset) % order.length];
+    if (livingIds.has(combatantId) && !acted[combatantId]) return combatantId;
+  }
+  return "";
+}
+
 function selectableAgentSlotsForDetail(detail: SessionDetail | null): number[] {
   if (!detail) return [1, 2, 3, 4];
+  if (detail.session.combat_state.in_combat && detail.session.combat_state.initiative_order.length) {
+    const activeCombatant = activeCombatantIdForDetail(detail);
+    if (activeCombatant === "opp:12" && detail.session.opposition_state?.active) return [OPPOSITION_SLOT];
+    if (activeCombatant?.startsWith("pc:")) {
+      const slot = Number(activeCombatant.replace("pc:", ""));
+      const member = detail.tab1.party.find((partyMember) => partyMember.slot === slot);
+      if (member && member.hp_current > 0) return [slot];
+    }
+  }
   const playerSlots = detail.tab1.party.filter((member) => member.hp_current > 0).map((member) => member.slot);
   const activeOrder = orderedAgentSlotsForDetail(detail).filter((slot) => slot !== OPPOSITION_SLOT);
   const orderedPlayers = activeOrder.filter((slot) => playerSlots.includes(slot));
@@ -209,7 +243,7 @@ export function App() {
   const [promptNarrationPending, setPromptNarrationPending] = useState(false);
   const [introAudioPlayed, setIntroAudioPlayed] = useState(false);
   const [onboardingGuideStep, setOnboardingGuideStep] = useState<OnboardingGuideStep>("starter");
-  const [splashOpen, setSplashOpen] = useState(() => window.localStorage.getItem("story-engine-mk4-splash-seen") !== "true");
+  const [splashOpen, setSplashOpen] = useState(() => window.localStorage.getItem("story-engine-mk5-splash-seen") !== "true");
 
   async function refresh(id = sessionId) {
     const data = await api<SessionDetail>(`/session/${id}`);
@@ -322,7 +356,7 @@ export function App() {
   const transcript = useMemo(() => {
     if (!detail) return [];
     return detail.events
-      .filter((event) => event.kind === "transcript" || event.kind === "objective_updated")
+      .filter((event) => event.kind === "transcript" || event.kind === "objective_updated" || event.kind === "inventory_gained" || event.kind === "inventory_lost")
       .map((event) => ({ ...event, text: sanitizeVisibleAgentText(event.text) }))
       .filter((event) => event.text.trim());
   }, [detail]);
@@ -945,6 +979,42 @@ export function App() {
     }
   }
 
+  async function searchLocation() {
+    if (!sessionId) return;
+    setLoading(true);
+    setError("");
+    try {
+      const sessionSummary = await api<SessionDetail["session"]>(`/session/${sessionId}/search`, {
+        method: "POST",
+        body: JSON.stringify({ agent_slot: activeAgentSlot, skill: "Perception" }),
+      });
+      setDetail((current) => (current ? { ...current, session: sessionSummary } : current));
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function useSelectedItem(itemName: string) {
+    if (!sessionId || !itemName) return;
+    setLoading(true);
+    setError("");
+    try {
+      const sessionSummary = await api<SessionDetail["session"]>(`/session/${sessionId}/use-item`, {
+        method: "POST",
+        body: JSON.stringify({ agent_slot: activeAgentSlot, item_name: itemName, target_id: `pc:${activeAgentSlot}` }),
+      });
+      setDetail((current) => (current ? { ...current, session: sessionSummary } : current));
+      await refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function submitFeedback() {
     if (!sessionId || !feedbackText.trim()) return;
     setFeedbackSubmitting(true);
@@ -986,7 +1056,7 @@ export function App() {
   }
 
   function enterApp() {
-    window.localStorage.setItem("story-engine-mk4-splash-seen", "true");
+    window.localStorage.setItem("story-engine-mk5-splash-seen", "true");
     setSplashOpen(false);
   }
 
@@ -995,7 +1065,7 @@ export function App() {
   }
 
   if (!catalogBoot || !detail) {
-    return <div className="loading-shell">Loading Story Engine MK4...</div>;
+    return <div className="loading-shell">Loading Story Engine MK5...</div>;
   }
 
   const tutorialEmbedUrl = youtubeEmbedUrl(TUTORIAL_VIDEO_URL);
@@ -1025,7 +1095,7 @@ export function App() {
         <div className="splash-overlay" role="dialog" aria-modal="true" aria-label="Story Engine tutorial">
           <div className="splash-card splash-card--tutorial">
             <div className="splash-copy">
-              <div className="eyebrow">Story Engine MK4</div>
+              <div className="eyebrow">Story Engine MK5</div>
               <h1>Welcome to Valaska</h1>
               <p>Watch the quick tutorial, then enter the adventure console to choose a mission, build the party, and begin play.</p>
             </div>
@@ -1033,7 +1103,7 @@ export function App() {
               {tutorialEmbedUrl ? (
                 <iframe
                   src={tutorialEmbedUrl}
-                  title="Story Engine MK4 tutorial video"
+                  title="Story Engine MK5 tutorial video"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                   allowFullScreen
                 />
@@ -1067,7 +1137,7 @@ export function App() {
 
       <header className="hero hero--phase1">
         <div>
-          <div className="eyebrow">Story Engine MK4</div>
+          <div className="eyebrow">Story Engine MK5</div>
           <h1 className="hero-title">{headerAdventureTitle}</h1>
           <p className="hero-copy">Preparation, adventure play, and feedback now follow a simpler phase-by-phase layout built around the mission map, location cell, and GM prompting.</p>
         </div>
@@ -1204,6 +1274,8 @@ export function App() {
             onSetEncounterQuantity={setEncounterQuantity}
             onTriggerEncounter={() => void triggerEncounter()}
             onFleeEncounter={() => void fleeEncounter()}
+            onSearchLocation={() => void searchLocation()}
+            onUseItem={(itemName) => void useSelectedItem(itemName)}
             onStartOver={startOver}
             displayAdventureTitle={displayAdventureTitle}
           />

@@ -70,6 +70,7 @@ class Session(Base):
     current_location_name: Mapped[str] = mapped_column(String(240), default="", nullable=False)
     combat_state: Mapped[dict] = mapped_column(json_type(), default=dict, nullable=False)
     opposition_state: Mapped[dict] = mapped_column(json_type(), default=dict, nullable=False)
+    encounter_state: Mapped[dict] = mapped_column(json_type(), default=dict, nullable=False)
     mission_objective_state: Mapped[dict] = mapped_column(json_type(), default=dict, nullable=False)
     generated_image: Mapped[dict] = mapped_column(json_type(), default=dict, nullable=False)
     selected_narrative_player_id: Mapped[str] = mapped_column(String(120), default="", nullable=False)

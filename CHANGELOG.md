@@ -1,6 +1,12 @@
 # Changelog
 
-All notable changes to Story Engine MK4 are documented in this file.
+All notable changes to Story Engine MK5 are documented in this file.
+
+## [Unreleased] - 2026-05-04
+
+### Changed
+- Started MK5 from the stable MK4 guided-onboarding baseline.
+- Updated local project identity and Git remote for the new MK5 repository.
 
 ## [Unreleased] - 2026-04-24
 

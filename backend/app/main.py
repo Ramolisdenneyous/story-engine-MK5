@@ -19,6 +19,8 @@ from .schemas import (
     DiceRollResult,
     FeedbackCreateRequest,
     FeedbackCreateResponse,
+    EncounterSearchRequest,
+    HazardChallengeRequest,
     ImageGenerateResponse,
     InitiativeResponse,
     MonsterReferenceOut,
@@ -35,11 +37,13 @@ from .schemas import (
     TTSRequest,
     Tab1InputPayload,
     Tab1InputResponse,
+    UseItemRequest,
 )
 from .services import (
     asset_url,
     build_narrative,
     create_feedback_submission,
+    challenge_hazard,
     create_session,
     dismiss_opposition,
     end_chapter,
@@ -47,6 +51,7 @@ from .services import (
     generate_scene_image,
     get_session_detail,
     lock_tab1,
+    normalize_combat_state_for_output,
     prompt_agent,
     reset_session,
     return_to_moosehearth,
@@ -55,6 +60,7 @@ from .services import (
     roll_initiative,
     save_narrative_agent,
     save_tab1,
+    search_current_location,
     serialize_adventure,
     serialize_adventure_summary,
     serialize_class_summary,
@@ -65,9 +71,10 @@ from .services import (
     synthesize_player_reply_tts,
     take_long_rest,
     travel_to_location,
+    use_item,
 )
 
-app = FastAPI(title="Story Engine MK2", version="2.0.0")
+app = FastAPI(title="Story Engine MK5", version="5.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -99,6 +106,7 @@ def _ensure_schema() -> None:
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS current_location_name VARCHAR(240) DEFAULT '' NOT NULL",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS combat_state JSON DEFAULT '{}' NOT NULL",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS opposition_state JSON DEFAULT '{}' NOT NULL",
+            "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS encounter_state JSON DEFAULT '{}' NOT NULL",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS mission_objective_state JSON DEFAULT '{}' NOT NULL",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS generated_image JSON DEFAULT '{}' NOT NULL",
             "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS selected_narrative_player_id VARCHAR(120) DEFAULT '' NOT NULL",
@@ -146,11 +154,12 @@ def _session_summary(session) -> SessionSummary:
         prompt_index=session.prompt_index,
         last_summarized_prompt_index=session.last_summarized_prompt_index,
         tab1_locked=session.tab1_locked,
-        combat_state=CombatStateOut(**(session.combat_state or {"in_combat": False, "round": 1, "turn_index": 0, "initiative_order": [], "initiative_values": {}})),
+        combat_state=CombatStateOut(**normalize_combat_state_for_output(session.combat_state)),
         selected_narrative_player_id=session.selected_narrative_player_id or "",
         opposition_state=(session.opposition_state or None),
         current_location_id=session.current_location_id or "",
         current_location_name=session.current_location_name or "",
+        encounter_state=session.encounter_state or {},
         mission_objective_state=session.mission_objective_state or {},
     )
 
@@ -329,6 +338,30 @@ def spawn_opposition_endpoint(session_id: str, payload: OppositionSpawnRequest, 
 def dismiss_opposition_endpoint(session_id: str, db: Session = Depends(get_db)):
     try:
         return _session_summary(dismiss_opposition(db, session_id))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/session/{session_id}/search", response_model=SessionSummary)
+def search_current_location_endpoint(session_id: str, payload: EncounterSearchRequest, db: Session = Depends(get_db)):
+    try:
+        return _session_summary(search_current_location(db, session_id, payload.agent_slot, payload.skill))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/session/{session_id}/hazard", response_model=SessionSummary)
+def challenge_hazard_endpoint(session_id: str, payload: HazardChallengeRequest, db: Session = Depends(get_db)):
+    try:
+        return _session_summary(challenge_hazard(db, session_id, payload.agent_slot, payload.skill))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/session/{session_id}/use-item", response_model=SessionSummary)
+def use_item_endpoint(session_id: str, payload: UseItemRequest, db: Session = Depends(get_db)):
+    try:
+        return _session_summary(use_item(db, session_id, payload.agent_slot, payload.item_name, payload.target_id))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

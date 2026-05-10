@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     chunk_size_prompts: int = 7
 
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     def model_post_init(self, __context) -> None:
         self.database_url = _normalize_database_url(self.database_url)

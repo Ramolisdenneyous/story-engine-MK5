@@ -491,6 +491,7 @@ class OpenAIProvider(LLMProvider):
         opposition_state = payload.get("opposition_state", {})
         mechanical_hint = payload.get("mechanical_resolution_hint", {})
         mission_objective = payload.get("mission_objective", {})
+        current_encounter = payload.get("current_encounter", {})
         current_location = payload.get("current_location", "")
         user_prompt = payload["user_prompt"]
         lines = []
@@ -514,6 +515,8 @@ class OpenAIProvider(LLMProvider):
             f"{current_location}\n\n"
             "[Mission Objective]\n"
             f"{json.dumps(mission_objective, ensure_ascii=True)}\n\n"
+            "[Current Encounter]\n"
+            f"{json.dumps(current_encounter, ensure_ascii=True)}\n\n"
             "[Opposition State]\n"
             f"{json.dumps(opposition_state, ensure_ascii=True)}\n\n"
             "[Recent Context]\n"
@@ -544,6 +547,9 @@ class OpenAIProvider(LLMProvider):
             "PERCEPTION",
             "INVESTIGATION",
             "SEARCH",
+            "POTION_OF_HEALING",
+            "POTION_OF_SPELL_RESTORE",
+            "FIREBALL_SCROLL",
         ]
         supported_abilities.extend(
             re.sub(r"[^A-Z0-9]+", "_", name.strip().upper()).strip("_")
@@ -566,7 +572,7 @@ class OpenAIProvider(LLMProvider):
                                     "additionalProperties": False,
                                     "properties": {
                                         "actor_id": {"type": "string"},
-                                        "action_type": {"type": "string", "enum": ["ATTACK", "SPELL", "SKILL"]},
+                                        "action_type": {"type": "string", "enum": ["ATTACK", "SPELL", "SKILL", "USE_ITEM"]},
                                         "ability": {"type": "string", "enum": supported_abilities},
                                         "target_id": {"type": "string"},
                                     },

@@ -47,6 +47,7 @@ class EventKind(str, enum.Enum):
     MONSTER_DIED = "monster_died"
     OPPOSITION_DISMISSED = "opposition_dismissed"
     OBJECTIVE_UPDATED = "objective_updated"
+    RESOURCE_CHANGED = "resource_changed"
 
 
 class MemoryBlockType(str, enum.Enum):

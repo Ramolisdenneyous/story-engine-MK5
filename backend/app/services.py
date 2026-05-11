@@ -34,8 +34,8 @@ from .game_data import (
 from .llm import GenerationResult, get_provider, log_artifact, tts_voice_alias_for_player
 from .models import Event, EventKind, EventRole, FeedbackSubmission, MemoryBlock, MemoryBlockType, NarrativeDraft, Session as SessionModel, SessionState, Tab1Inputs
 
-DICE_RE = re.compile(r"^\s*(\d{1,3})\s*d\s*(4|6|8|10|12|20)\s*([+-]\s*\d+)?\s*$", re.IGNORECASE)
-VALID_DICE_SIDES = {4, 6, 8, 10, 12, 20}
+DICE_RE = re.compile(r"^\s*(\d{1,3})\s*d\s*(4|6|8|10|12|20|100)\s*([+-]\s*\d+)?\s*$", re.IGNORECASE)
+VALID_DICE_SIDES = {4, 6, 8, 10, 12, 20, 100}
 SLOT_COLORS = {1: "red", 2: "orange", 3: "yellow", 4: "green"}
 ASSET_DIR = Path("/app/docs/images")
 OPPOSITION_AGENT_SLOT = 12
@@ -45,6 +45,16 @@ OPPOSITION_CLEANUP_DELAY_SECONDS = 5
 MONSTER_INSTANCE_LABELS = ["Monster-One", "Monster-Two", "Monster-Three", "Monster-Four"]
 logger = logging.getLogger(__name__)
 RETURN_TO_MOOSEHEARTH_TEXT = "The objective is complete. Return to Moosehearth to report your success."
+SPELL_MP_COSTS = {"CURE_WOUNDS": 1, "MAGIC_MISSILE": 1, "BLESS": 1, "THUNDERWAVE": 1, "BURNING_HANDS": 1}
+COMBAT_DURATION_STATUSES = {"Rage", "Bless"}
+LONG_REST_AMBUSHES = {
+    "icebane-castle": ["Shadow", "Shadow"],
+    "east-marsh-raid": ["Orc", "Orc"],
+    "telas-wagons": ["Berserker"],
+    "old-people-barrow": ["Zombie", "Zombie", "Zombie", "Zombie"],
+    "collecting-taxes": ["Bandit", "Bandit", "Bandit"],
+    "endless-glacier-undead": ["Ghast", "Ghast"],
+}
 HAZARD_PRESENTATION = {
     "steep_cliffside": {
         "announcement": "The path pinches against a wind-scoured cliffside. Ice-slick stone offers only narrow handholds, and every upward pull sends loose shale ticking into the drop below. Each adventurer must make steady Athletics progress to climb clear; failed efforts mean slips, bruising impacts, and lost ground.",
@@ -327,6 +337,23 @@ def _set_mission_complete(db: Session, session: SessionModel, prompt_index: int,
 
 def _combatant_id_for_slot(slot: int) -> str:
     return OPPOSITION_INITIATIVE_ID if slot == OPPOSITION_AGENT_SLOT else f"pc:{slot}"
+
+
+def _mp_max_for_class(class_id: str) -> int:
+    return int(CLASSES.get(class_id, {}).get("mp_max", 0) or 0)
+
+
+def _class_feature_summaries(class_id: str) -> list[str]:
+    return {
+        "Fighter": ["Cleave: attack up to 2 different targets with Longsword."],
+        "Barbarian": ["Rage: 2/adventure, combat-long +2 attack damage and half incoming damage."],
+        "Rogue": ["Skill Expert: advantage on skill checks.", "Sneak Attack: double damage against an already damaged target once per turn."],
+        "Ranger": ["Double Nock: attack the same target twice with Longbow."],
+        "Paladin": ["Smite: 1/combat, Longsword attack plus 2d8 damage.", "Lay on Hands: 1/combat, heal a player 5 HP in combat."],
+        "Cleric": ["Bless: 1 MP, party gains +2 attack and damage for the combat."],
+        "Druid": ["Thunderwave: 1 MP, attack every living Opposition target for 2d8 damage on hit."],
+        "Wizard": ["Firebolt: free spell, +10 attack, 1d10 damage.", "Burning Hands: 1 MP, attack every living Opposition target for 3d6 damage on hit."],
+    }.get(class_id, [])
 
 
 def _living_player_combatant_ids(db: Session, session: SessionModel) -> set[str]:
@@ -939,7 +966,12 @@ def _party_member(slot: int, player_id: str, class_id: str, state: dict | None =
         "armor_class": class_data["armor_class"],
         "hp_max": class_data["hp_max"],
         "hp_current": member_state.get("hp_current", class_data["hp_max"]),
+        "mp_max": _mp_max_for_class(class_id),
+        "mp_current": member_state.get("mp_current", _mp_max_for_class(class_id)),
         "status_effects": member_state.get("status_effects", []),
+        "class_features": _class_feature_summaries(class_id),
+        "feature_uses": member_state.get("feature_uses", {}),
+        "current_combat_feature_uses": member_state.get("current_combat_feature_uses", {}),
         "inventory": member_state.get("inventory", _starting_inventory(player_id, class_id)),
         "initiative": member_state.get("initiative"),
     }
@@ -1101,6 +1133,12 @@ def _build_character_payload(db: Session, session: SessionModel, agent_slot: int
         "class_sheet": {
             **class_data,
             "inventory": current_state.get("inventory", _starting_inventory(player_id, class_id)),
+            "mp_current": current_state.get("mp_current", _mp_max_for_class(class_id)),
+            "mp_max": _mp_max_for_class(class_id),
+            "status_effects": current_state.get("status_effects", []),
+            "class_features": _class_feature_summaries(class_id),
+            "feature_uses": current_state.get("feature_uses", {}),
+            "current_combat_feature_uses": current_state.get("current_combat_feature_uses", {}),
             "proficiency_bonus": 2,
             "ability_modifiers": _ability_modifiers(class_data["ability_scores"]),
         },
@@ -1157,7 +1195,12 @@ def _build_party_combat_state(db: Session, session: SessionModel) -> list[dict]:
                 # consistent `current_hp` field for players and monsters.
                 "current_hp": state.get("hp_current", class_data["hp_max"]),
                 "hp_max": class_data["hp_max"],
+                "mp_current": state.get("mp_current", _mp_max_for_class(class_id)),
+                "mp_max": _mp_max_for_class(class_id),
                 "status_effects": state.get("status_effects", []),
+                "class_features": _class_feature_summaries(class_id),
+                "feature_uses": state.get("feature_uses", {}),
+                "current_combat_feature_uses": state.get("current_combat_feature_uses", {}),
                 "inventory": state.get("inventory", []),
                 "initiative": session.combat_state.get("initiative_values", {}).get(f"pc:{slot}"),
             }
@@ -1210,6 +1253,7 @@ def _build_player_mechanical_hint(db: Session, session: SessionModel, agent_slot
     requested_check_type = _extract_requested_check_type(user_text)
     injured_ally_targets = _build_injured_ally_targets(db, session)
     inventory = derive_party_state(db, session.session_id).get(str(agent_slot), {}).get("inventory", [])
+    actor_state = derive_party_state(db, session.session_id).get(str(agent_slot), {})
     return {
         "tool_first_required": True,
         "actor_id": _player_actor_id(agent_slot),
@@ -1221,6 +1265,11 @@ def _build_player_mechanical_hint(db: Session, session: SessionModel, agent_slot
         "injured_ally_targets": injured_ally_targets,
         "visible_monster_targets": visible_targets,
         "available_actions": _build_player_action_catalog(class_data, inventory),
+        "mp": {
+            "current": actor_state.get("mp_current", _mp_max_for_class(str(class_data.get("class_id", "")))),
+            "max": _mp_max_for_class(str(class_data.get("class_id", ""))),
+            "spell_costs": SPELL_MP_COSTS,
+        },
         "required_action_tool": "resolve_action",
         "default_action_sequence": [
             "choose_target",
@@ -1244,6 +1293,7 @@ def _extract_monster_damage_formula(monster_stats: dict) -> str:
 
 
 def _build_opposition_mechanical_hint(db: Session, session: SessionModel) -> dict:
+    db.flush()
     opposition_state = copy.deepcopy(session.opposition_state or _empty_opposition_state())
     monster_stats = opposition_state.get("monster_stats", {})
     attack_bonus = int(monster_stats.get("attack_bonus", 0) or 0)
@@ -1252,7 +1302,11 @@ def _build_opposition_mechanical_hint(db: Session, session: SessionModel) -> dic
     return {
         "tool_first_required": True,
         "living_monster_count": len(_living_opposition_instances(opposition_state)),
-        "party_targets": _build_party_combat_state(db, session),
+        "party_targets": [
+            member
+            for member in _build_party_combat_state(db, session)
+            if int(member.get("hp_current", 0) or 0) > 0
+        ],
         "living_monster_actors": _build_monster_actor_catalog(session),
         "required_action_tool": "resolve_action",
         "default_action_sequence": [
@@ -1288,6 +1342,8 @@ def _build_ally_targets(db: Session, session: SessionModel) -> list[dict]:
             "armor_class": member["armor_class"],
             "current_hp": member["hp_current"],
             "hp_max": member["hp_max"],
+            "mp_current": member.get("mp_current", 0),
+            "mp_max": member.get("mp_max", 0),
             "status_effects": member["status_effects"],
         }
         for member in _build_party_combat_state(db, session)
@@ -1328,11 +1384,27 @@ def _build_player_action_catalog(class_data: dict, inventory: list[str] | None =
             }
         )
     features = set(class_data.get("features", []))
+    class_id = class_data.get("class_id")
+    if class_id == "Fighter":
+        actions.append({"action_type": "ATTACK", "ability": "CLEAVE", "display_name": "Cleave", "attack_formula": "1d20+5", "damage_formula": "1d8+3", "damage_type": "slashing"})
+    if class_id == "Barbarian":
+        actions.append({"action_type": "SPELL", "ability": "RAGE", "display_name": "Rage"})
+    if class_id == "Ranger":
+        actions.append({"action_type": "ATTACK", "ability": "DOUBLE_NOCK", "display_name": "Double Nock", "attack_formula": "1d20+5", "damage_formula": "1d8+3", "damage_type": "piercing"})
+    if class_id == "Paladin":
+        actions.append({"action_type": "ATTACK", "ability": "SMITE", "display_name": "Smite", "attack_formula": "1d20+5", "damage_formula": "1d8+3", "damage_type": "slashing"})
+        actions.append({"action_type": "SPELL", "ability": "LAY_ON_HANDS", "display_name": "Lay on Hands"})
     if "Spellcasting" in features:
         if class_data.get("class_id") in {"Wizard"}:
             actions.append({"action_type": "SPELL", "ability": "MAGIC_MISSILE", "display_name": "Magic Missile"})
+            actions.append({"action_type": "SPELL", "ability": "FIREBOLT", "display_name": "Firebolt"})
+            actions.append({"action_type": "SPELL", "ability": "BURNING_HANDS", "display_name": "Burning Hands"})
         if class_data.get("class_id") in {"Cleric", "Druid"}:
             actions.append({"action_type": "SPELL", "ability": "CURE_WOUNDS", "display_name": "Cure Wounds"})
+        if class_data.get("class_id") == "Cleric":
+            actions.append({"action_type": "SPELL", "ability": "BLESS", "display_name": "Bless"})
+        if class_data.get("class_id") == "Druid":
+            actions.append({"action_type": "SPELL", "ability": "THUNDERWAVE", "display_name": "Thunderwave"})
     actions.extend(
         [
             {"action_type": "SKILL", "ability": "ATHLETICS", "display_name": "Athletics"},
@@ -1386,6 +1458,35 @@ def _inventory_items_overlap(left: str, right: str) -> bool:
         or left_norm in right_norm
         or right_norm in left_norm
     )
+
+
+def _is_stackable_inventory_item(value: str) -> bool:
+    normalized = _normalize_inventory_item_text(value)
+    return normalized in {"potion of healing", "potion of spell restore", "fireball scroll"}
+
+
+def _is_mechanical_consumable_item(value: str) -> bool:
+    normalized = _normalize_inventory_item_text(value)
+    return normalized in {"potion of healing", "potion of spell restore", "fireball scroll"}
+
+
+def _add_inventory_item_once(inventory: list[str], item: str) -> list[str]:
+    item_name, item_count = _split_inventory_stack(item)
+    updated = list(inventory)
+    if not _is_stackable_inventory_item(item):
+        if any(_inventory_items_overlap(existing, item) for existing in updated):
+            return updated
+        updated.append(item)
+        return updated
+
+    for index, existing in enumerate(updated):
+        if not _inventory_items_overlap(existing, item):
+            continue
+        existing_name, existing_count = _split_inventory_stack(existing)
+        updated[index] = _format_inventory_stack(existing_name, existing_count + item_count)
+        return updated
+    updated.append(_format_inventory_stack(item_name, item_count))
+    return updated
 
 
 def _remove_inventory_item_once(inventory: list[str], requested_item: str) -> list[str]:
@@ -1505,6 +1606,11 @@ def _resolve_payload_context(payload: dict) -> dict:
             "class_id": class_sheet.get("class_id", ""),
             "armor_class": class_sheet.get("armor_class"),
             "hp_max": class_sheet.get("hp_max"),
+            "mp_current": class_sheet.get("mp_current", 0),
+            "mp_max": class_sheet.get("mp_max", 0),
+            "status_effects": class_sheet.get("status_effects", []),
+            "feature_uses": class_sheet.get("feature_uses", {}),
+            "current_combat_feature_uses": class_sheet.get("current_combat_feature_uses", {}),
             "inventory": class_sheet.get("inventory", []),
         }
         _register_action_reference(actor_alias_map, canonical_actor_id, canonical_actor_id, str(player_identity.get("name", "") or ""))
@@ -1546,6 +1652,43 @@ def _is_living_target(target: dict[str, Any]) -> bool:
         return False
 
 
+def _combat_is_active_from_context(context: dict) -> bool:
+    return bool(context["opposition_state"].get("active") or context["mechanical_hint"].get("visible_monster_targets") or context["mechanical_hint"].get("living_monster_actors"))
+
+
+def _feature_use_count(actor: dict[str, Any], feature: str, combat_only: bool = False) -> int:
+    key = feature.lower()
+    source = actor.get("current_combat_feature_uses" if combat_only else "feature_uses", {}) or {}
+    try:
+        return int(source.get(key, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _player_targets_from_context(context: dict) -> list[dict[str, Any]]:
+    targets = [
+        target
+        for target in context["target_map"].values()
+        if str(target.get("target_type", "") or "") == "player"
+    ]
+    deduped: dict[str, dict[str, Any]] = {}
+    for target in targets:
+        target_id = str(target.get("target_id", "") or "")
+        if target_id:
+            deduped[target_id] = target
+    return list(deduped.values())
+
+
+def _add_modifier_to_roll_total(roll: dict[str, Any], modifier: int) -> dict[str, Any]:
+    if not modifier:
+        return roll
+    updated = dict(roll)
+    updated["total"] = int(updated.get("total", 0) or 0) + modifier
+    updated["modifier"] = int(updated.get("modifier", 0) or 0) + modifier
+    updated["formula"] = f"{updated.get('formula', '')}{'+' if modifier > 0 else ''}{modifier}"
+    return updated
+
+
 def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str, Any]:
     context = _resolve_payload_context(payload)
     actions = args.get("actions", [])
@@ -1574,7 +1717,13 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
         target_id = _canonicalize_action_reference(raw_target_id, context["target_map"], context["target_alias_map"])
         actor = context["actor_map"].get(actor_id, {})
         target = context["target_map"].get(target_id, {})
-        if not target and action_type == "USE_ITEM" and ability == "FIREBALL_SCROLL" and context["visible_monsters"]:
+        if not target and action_type == "SPELL" and ability in {"RAGE", "BLESS"} and actor_id in context["target_map"]:
+            target_id = actor_id
+            target = context["target_map"].get(target_id, {})
+        elif not target and action_type == "SPELL" and ability in {"THUNDERWAVE", "BURNING_HANDS"} and context["visible_monsters"]:
+            target_id = str(context["visible_monsters"][0].get("target_id", "") or "")
+            target = context["target_map"].get(target_id, {})
+        elif not target and action_type == "USE_ITEM" and ability == "FIREBALL_SCROLL" and context["visible_monsters"]:
             target_id = str(context["visible_monsters"][0].get("target_id", "") or "")
             target = context["target_map"].get(target_id, {})
         elif not target and action_type == "USE_ITEM" and actor_id in context["target_map"]:
@@ -1630,10 +1779,8 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                 ability = canonical_ability
 
         target_type = str(target.get("target_type", "") or "")
-        if action_type == "ATTACK" or (action_type == "SPELL" and ability == "MAGIC_MISSILE"):
-            # Keep monster-target guard to prevent replay/phantom damage against dead monsters.
-            # Do not block player targets at 0 HP; opposition may intentionally target downed PCs.
-            if target_type == "monster" and not _is_living_target(target):
+        if action_type == "ATTACK" or (action_type == "SPELL" and ability in {"MAGIC_MISSILE", "FIREBOLT"}):
+            if target_type in {"monster", "player"} and not _is_living_target(target):
                 validation_errors.append(
                     {
                         "action_index": index,
@@ -1650,7 +1797,7 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                 )
                 continue
 
-        if action_type == "SPELL" and ability == "CURE_WOUNDS":
+        if action_type == "SPELL" and ability in {"CURE_WOUNDS", "LAY_ON_HANDS"}:
             hp_current = int(target.get("current_hp", 0) or 0)
             hp_max = int(target.get("hp_max", 0) or 0)
             if target_type != "player" or hp_current >= hp_max:
@@ -1680,6 +1827,43 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
             }
         )
 
+    player_attack_actions = [action for action in normalized_actions if str(action.get("actor_id", "") or "").startswith("pc:") and str(action.get("action_type", "") or "").upper() == "ATTACK"]
+    actions_by_actor: dict[str, list[dict[str, Any]]] = {}
+    for action in player_attack_actions:
+        actions_by_actor.setdefault(str(action.get("actor_id", "") or ""), []).append(action)
+    for grouped_actor_id, grouped_actions in actions_by_actor.items():
+        if len(grouped_actions) <= 1:
+            continue
+        actor = context["actor_map"].get(grouped_actor_id, {})
+        actor_class_id = str(actor.get("class_id", "") or "")
+        abilities = {_normalize_ability_name(str(action.get("ability", "") or "")) for action in grouped_actions}
+        target_ids = [str(action.get("target_id", "") or "") for action in grouped_actions]
+        if actor_class_id == "Fighter" and len(grouped_actions) <= 2 and abilities <= {"LONGSWORD", "CLEAVE"} and len(set(target_ids)) == len(target_ids):
+            continue
+        if actor_class_id == "Ranger" and len(grouped_actions) <= 2 and abilities <= {"LONGBOW", "DOUBLE_NOCK"} and len(set(target_ids)) == 1:
+            continue
+        validation_errors.append(
+            {
+                "kind": "invalid_multiattack",
+                "provided_actor_id": grouped_actor_id,
+                "reason": "Only Fighter Cleave may attack two different targets, and only Ranger Double Nock may attack the same target twice.",
+            }
+        )
+
+    single_resolution_abilities = {"THUNDERWAVE", "BURNING_HANDS", "BLESS", "RAGE"}
+    deduped_special_actions: list[dict[str, Any]] = []
+    seen_special_actions: set[tuple[str, str, str]] = set()
+    for action in normalized_actions:
+        action_type = str(action.get("action_type", "") or "").upper()
+        ability = _normalize_ability_name(str(action.get("ability", "") or ""))
+        if action_type == "SPELL" and ability in single_resolution_abilities:
+            special_key = (str(action.get("actor_id", "") or ""), action_type, ability)
+            if special_key in seen_special_actions:
+                continue
+            seen_special_actions.add(special_key)
+        deduped_special_actions.append(action)
+    normalized_actions = deduped_special_actions
+
     if is_opposition_turn and normalized_actions:
         deduped_actions: list[dict[str, Any]] = []
         seen_actor_ids: set[str] = set()
@@ -1704,6 +1888,10 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
     results: list[dict[str, Any]] = []
     rolls: list[dict[str, Any]] = []
     state_targets: list[dict[str, Any]] = []
+    projected_target_hp: dict[str, int] = {
+        target_id: int(target.get("current_hp", 0) or 0)
+        for target_id, target in context["target_map"].items()
+    }
 
     for action in normalized_actions:
         actor_id = str(action.get("actor_id", "") or "")
@@ -1732,6 +1920,19 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
         }
 
         if action_type == "ATTACK":
+            if ability == "SMITE":
+                if actor_class_id != "Paladin":
+                    result.update({"success": False, "reason": "Only a Paladin can use Smite."})
+                    results.append(result)
+                    continue
+                if not _combat_is_active_from_context(context):
+                    result.update({"success": False, "reason": "Smite can only be used in combat."})
+                    results.append(result)
+                    continue
+                if _feature_use_count(actor, "smite", combat_only=True) >= 1:
+                    result.update({"success": False, "reason": "Smite has already been used this combat."})
+                    results.append(result)
+                    continue
             attack_profile = context["action_map"].get((actor_id, ability), {})
             if not attack_profile and actor_id in opposition_actor_ids:
                 attack_profile = context["actor_map"].get(actor_id, {})
@@ -1746,6 +1947,8 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
             damage_type = attack_profile.get("damage_type", "")
             if attack_formula and damage_formula and target_id:
                 attack_roll = perform_dice_roll(attack_formula, "attack roll", actor_id)
+                if "Bless" in actor.get("status_effects", []):
+                    attack_roll = _add_modifier_to_roll_total(attack_roll, 2)
                 rolls.append(attack_roll)
                 result["attack_total"] = int(attack_roll.get("total", 0) or 0)
                 result["target_ac"] = int(target.get("armor_class", 0) or 0)
@@ -1757,8 +1960,35 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                     damage_roll = perform_dice_roll(damage_formula, "damage roll", actor_id)
                     rolls.append(damage_roll)
                     damage = int(damage_roll.get("total", 0) or 0)
+                    if "Bless" in actor.get("status_effects", []):
+                        damage += 2
+                    if actor_class_id == "Barbarian" and "Rage" in actor.get("status_effects", []):
+                        damage += 2
+                    if actor_class_id == "Rogue" and int(target.get("current_hp", 0) or 0) < int(target.get("hp_max", 0) or 0):
+                        base_damage = damage
+                        damage *= 2
+                        result["reason"] = "Sneak Attack doubled the damage against an already damaged target."
+                        result["bonus_damage_note"] = f"Sneak Attack applied: {base_damage} damage doubled to {damage} before other effects."
+                    if ability == "SMITE":
+                        smite_roll = perform_dice_roll("2d8", "smite damage", actor_id)
+                        rolls.append(smite_roll)
+                        damage += int(smite_roll.get("total", 0) or 0)
+                        state_targets.append(
+                            {
+                                "target_type": "player",
+                                "target_slot": int(actor.get("slot", 0) or 0),
+                                "target_id": actor_id,
+                                "actor_id": actor_id,
+                                "ability": ability,
+                                "changes": [{"kind": "feature_use", "amount": 1, "value": "smite"}],
+                            }
+                        )
+                    if target_type == "player" and "Rage" in target.get("status_effects", []):
+                        damage = damage // 2
+                    current_hp = projected_target_hp.get(target_id, int(target.get("current_hp", 0) or 0))
                     result["damage"] = damage
-                    result["target_hp_after"] = max(0, int(target.get("current_hp", 0) or 0) - damage)
+                    result["target_hp_after"] = max(0, current_hp - damage)
+                    projected_target_hp[target_id] = int(result["target_hp_after"])
                     state_targets.append(
                         {
                             "target_type": target_type or "monster",
@@ -1784,7 +2014,10 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                 continue
             lowered_item = matched_item.lower()
             if "healing" in lowered_item or "hp potion" in lowered_item:
-                result.update({"hit": True, "success": True, "healing": 10, "target_hp_after": min(int(target.get("hp_max", 0) or 0), int(target.get("current_hp", 0) or 0) + 10)})
+                heal_roll = perform_dice_roll("2d4+2", "potion healing", actor_id)
+                rolls.append(heal_roll)
+                healing = int(heal_roll.get("total", 0) or 0)
+                result.update({"hit": True, "success": True, "healing": healing, "target_hp_after": min(int(target.get("hp_max", 0) or 0), int(target.get("current_hp", 0) or 0) + healing)})
                 state_targets.append(
                     {
                         "target_type": "player",
@@ -1802,11 +2035,16 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                         "target_id": target_id,
                         "actor_id": actor_id,
                         "ability": ability,
-                        "changes": [{"kind": "healing", "amount": 10, "value": ""}],
+                        "changes": [{"kind": "healing", "amount": healing, "value": ""}],
                     }
                 )
             elif "spell restore" in lowered_item or "mp potion" in lowered_item:
-                result.update({"hit": True, "success": True, "reason": "MP restoration is recorded for the upcoming MP system."})
+                if int(target.get("mp_max", 0) or 0) <= 0:
+                    result.update({"success": False, "reason": "Potion of Spell Restore only works on Cleric, Druid, or Wizard targets."})
+                    results.append(result)
+                    continue
+                restore = min(5, max(0, int(target.get("mp_max", 0) or 0) - int(target.get("mp_current", 0) or 0)))
+                result.update({"hit": True, "success": True, "reason": f"Restores {restore} MP.", "target_hp_after": target.get("current_hp")})
                 state_targets.append(
                     {
                         "target_type": "player",
@@ -1817,6 +2055,17 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                         "changes": [{"kind": "inventory_remove", "amount": 0, "value": matched_item}],
                     }
                 )
+                if restore > 0:
+                    state_targets.append(
+                        {
+                            "target_type": "player",
+                            "target_slot": target_slot or int(actor.get("slot", 0) or 0),
+                            "target_id": target_id,
+                            "actor_id": actor_id,
+                            "ability": ability,
+                            "changes": [{"kind": "mp_restore", "amount": restore, "value": ""}],
+                        }
+                    )
             elif "fireball scroll" in lowered_item:
                 if actor_class_id != "Wizard":
                     result.update({"success": False, "reason": "Only a Wizard can use a Fireball Scroll."})
@@ -1849,10 +2098,230 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
             continue
 
         if action_type == "SPELL":
-            if ability == "MAGIC_MISSILE" and target_id:
+            mp_cost = SPELL_MP_COSTS.get(ability, 0)
+            if mp_cost and int(actor.get("mp_current", 0) or 0) < mp_cost:
+                result.update({"success": False, "reason": f"{ability.replace('_', ' ').title()} requires {mp_cost} MP, but you have insufficient MP."})
+                results.append(result)
+                continue
+            if ability == "RAGE":
+                if actor_class_id != "Barbarian":
+                    result.update({"success": False, "reason": "Only a Barbarian can use Rage."})
+                    results.append(result)
+                    continue
+                if not _combat_is_active_from_context(context):
+                    result.update({"success": False, "reason": "Rage can only be activated in combat."})
+                    results.append(result)
+                    continue
+                if _feature_use_count(actor, "rage") >= 2:
+                    result.update({"success": False, "reason": "Rage has no uses remaining this adventure."})
+                    results.append(result)
+                    continue
+                if "Rage" in actor.get("status_effects", []):
+                    result.update({"success": False, "reason": "Rage is already active."})
+                    results.append(result)
+                    continue
+                result.update({"hit": True, "success": True, "reason": "Rage is active for this combat.", "target_hp_after": target.get("current_hp")})
+                state_targets.append(
+                    {
+                        "target_type": "player",
+                        "target_slot": int(actor.get("slot", 0) or 0),
+                        "target_id": actor_id,
+                        "actor_id": actor_id,
+                        "ability": ability,
+                        "changes": [{"kind": "status_add", "amount": 0, "value": "Rage"}, {"kind": "feature_use", "amount": 1, "value": "rage"}],
+                    }
+                )
+            elif ability == "BLESS":
+                if actor_class_id != "Cleric":
+                    result.update({"success": False, "reason": "Only a Cleric can cast Bless."})
+                    results.append(result)
+                    continue
+                if not _combat_is_active_from_context(context):
+                    result.update({"success": False, "reason": "Bless can only be cast in combat."})
+                    results.append(result)
+                    continue
+                blessed_targets = _player_targets_from_context(context)
+                for bless_target in blessed_targets:
+                    if "Bless" in bless_target.get("status_effects", []):
+                        continue
+                    state_targets.append(
+                        {
+                            "target_type": "player",
+                            "target_slot": int(bless_target.get("slot", 0) or 0),
+                            "target_id": str(bless_target.get("target_id", "") or ""),
+                            "actor_id": actor_id,
+                            "ability": ability,
+                            "changes": [{"kind": "status_add", "amount": 0, "value": "Bless"}],
+                        }
+                    )
+                state_targets.append(
+                    {
+                        "target_type": "player",
+                        "target_slot": int(actor.get("slot", 0) or 0),
+                        "target_id": actor_id,
+                        "actor_id": actor_id,
+                        "ability": ability,
+                        "changes": [{"kind": "mp_spend", "amount": mp_cost, "value": ""}],
+                    }
+                )
+                result.update({"hit": True, "success": True, "reason": "Bless affects the party for this combat.", "target_hp_after": target.get("current_hp")})
+            elif ability == "LAY_ON_HANDS":
+                if actor_class_id != "Paladin":
+                    result.update({"success": False, "reason": "Only a Paladin can use Lay on Hands."})
+                    results.append(result)
+                    continue
+                if not _combat_is_active_from_context(context):
+                    result.update({"success": False, "reason": "Lay on Hands can only be used in combat."})
+                    results.append(result)
+                    continue
+                if _feature_use_count(actor, "lay_on_hands", combat_only=True) >= 1:
+                    result.update({"success": False, "reason": "Lay on Hands has already been used this combat."})
+                    results.append(result)
+                    continue
+                healing = 5
+                result.update({"hit": True, "success": True, "attack_total": 100, "healing": healing})
+                result["target_hp_after"] = min(int(target.get("hp_max", 0) or 0), int(target.get("current_hp", 0) or 0) + healing)
+                state_targets.append(
+                    {
+                        "target_type": "player",
+                        "target_slot": target_slot,
+                        "target_id": target_id,
+                        "actor_id": actor_id,
+                        "ability": ability,
+                        "changes": [{"kind": "healing", "amount": healing, "value": ""}],
+                    }
+                )
+                state_targets.append(
+                    {
+                        "target_type": "player",
+                        "target_slot": int(actor.get("slot", 0) or 0),
+                        "target_id": actor_id,
+                        "actor_id": actor_id,
+                        "ability": ability,
+                        "changes": [{"kind": "feature_use", "amount": 1, "value": "lay_on_hands"}],
+                    }
+                )
+            elif ability in {"THUNDERWAVE", "BURNING_HANDS"}:
+                expected_class = "Druid" if ability == "THUNDERWAVE" else "Wizard"
+                if actor_class_id != expected_class:
+                    result.update({"success": False, "reason": f"Only a {expected_class} can use {ability.replace('_', ' ').title()}."})
+                    results.append(result)
+                    continue
+                spell_damage_formula = "2d8" if ability == "THUNDERWAVE" else "3d6"
+                spell_damage_type = "thunder" if ability == "THUNDERWAVE" else "fire"
+                any_hit = False
+                total_damage = 0
+                aoe_attack_totals: list[int] = []
+                per_target_results: list[dict[str, Any]] = []
+                for monster in context["visible_monsters"]:
+                    if not _is_living_target(monster):
+                        continue
+                    spell_attack = perform_dice_roll("1d20+5", f"{ability.lower()} attack", actor_id)
+                    if "Bless" in actor.get("status_effects", []):
+                        spell_attack = _add_modifier_to_roll_total(spell_attack, 2)
+                    rolls.append(spell_attack)
+                    aoe_attack_totals.append(int(spell_attack.get("total", 0) or 0))
+                    if int(spell_attack.get("total", 0) or 0) < int(monster.get("armor_class", 0) or 0):
+                        per_target_results.append(
+                            {
+                                "target_id": monster["target_id"],
+                                "name": monster.get("name", monster["target_id"]),
+                                "hit": False,
+                                "attack_total": int(spell_attack.get("total", 0) or 0),
+                                "target_ac": int(monster.get("armor_class", 0) or 0),
+                                "damage": 0,
+                                "target_hp_after": int(monster.get("current_hp", 0) or 0),
+                            }
+                        )
+                        continue
+                    any_hit = True
+                    damage_roll = perform_dice_roll(spell_damage_formula, f"{ability.lower()} damage", actor_id)
+                    rolls.append(damage_roll)
+                    damage = int(damage_roll.get("total", 0) or 0)
+                    if "Bless" in actor.get("status_effects", []):
+                        damage += 2
+                    total_damage += damage
+                    target_hp_after = max(0, int(monster.get("current_hp", 0) or 0) - damage)
+                    per_target_results.append(
+                        {
+                            "target_id": monster["target_id"],
+                            "name": monster.get("name", monster["target_id"]),
+                            "hit": True,
+                            "attack_total": int(spell_attack.get("total", 0) or 0),
+                            "target_ac": int(monster.get("armor_class", 0) or 0),
+                            "damage": damage,
+                            "target_hp_after": target_hp_after,
+                        }
+                    )
+                    state_targets.append(
+                        {
+                            "target_type": "monster",
+                            "target_id": monster["target_id"],
+                            "actor_id": actor_id,
+                            "ability": ability,
+                            "changes": [{"kind": "damage", "amount": damage, "value": ""}],
+                        }
+                    )
+                state_targets.append(
+                    {
+                        "target_type": "player",
+                        "target_slot": int(actor.get("slot", 0) or 0),
+                        "target_id": actor_id,
+                        "actor_id": actor_id,
+                        "ability": ability,
+                        "changes": [{"kind": "mp_spend", "amount": mp_cost, "value": ""}],
+                    }
+                )
+                result.update(
+                    {
+                        "hit": any_hit,
+                        "success": True,
+                        "attack_total": max(aoe_attack_totals or [0]),
+                        "damage": total_damage,
+                        "damage_type": spell_damage_type,
+                        "per_target_results": per_target_results,
+                        "reason": f"{ability.replace('_', ' ').title()} resolves once, rolling separately for each living Opposition target.",
+                    }
+                )
+            elif ability == "FIREBOLT" and target_id:
+                if actor_class_id != "Wizard":
+                    result.update({"success": False, "reason": "Only a Wizard can cast Firebolt."})
+                    results.append(result)
+                    continue
+                attack_roll = perform_dice_roll("1d20+10", "firebolt attack", actor_id)
+                if "Bless" in actor.get("status_effects", []):
+                    attack_roll = _add_modifier_to_roll_total(attack_roll, 2)
+                rolls.append(attack_roll)
+                result["attack_total"] = int(attack_roll.get("total", 0) or 0)
+                result["target_ac"] = int(target.get("armor_class", 0) or 0)
+                result["damage_type"] = "fire"
+                hit = result["attack_total"] >= result["target_ac"]
+                result["hit"] = hit
+                result["success"] = hit
+                if hit:
+                    damage_roll = perform_dice_roll("1d10", "firebolt damage", actor_id)
+                    rolls.append(damage_roll)
+                    damage = int(damage_roll.get("total", 0) or 0)
+                    if "Bless" in actor.get("status_effects", []):
+                        damage += 2
+                    result["damage"] = damage
+                    result["target_hp_after"] = max(0, int(target.get("current_hp", 0) or 0) - damage)
+                    state_targets.append(
+                        {
+                            "target_type": target_type or "monster",
+                            "target_slot": target_slot,
+                            "target_id": target_id,
+                            "actor_id": actor_id,
+                            "ability": ability,
+                            "changes": [{"kind": "damage", "amount": damage, "value": ""}],
+                        }
+                    )
+            elif ability == "MAGIC_MISSILE" and target_id:
                 damage_roll = perform_dice_roll("3d4+3", "spell damage", actor_id)
                 rolls.append(damage_roll)
                 damage = int(damage_roll.get("total", 0) or 0)
+                if "Bless" in actor.get("status_effects", []):
+                    damage += 2
                 result.update({"hit": True, "success": True, "attack_total": 100, "damage": damage, "damage_type": "force"})
                 result["target_hp_after"] = max(0, int(target.get("current_hp", 0) or 0) - damage)
                 state_targets.append(
@@ -1863,6 +2332,16 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                         "actor_id": actor_id,
                         "ability": ability,
                         "changes": [{"kind": "damage", "amount": damage, "value": ""}],
+                    }
+                )
+                state_targets.append(
+                    {
+                        "target_type": "player",
+                        "target_slot": int(actor.get("slot", 0) or 0),
+                        "target_id": actor_id,
+                        "actor_id": actor_id,
+                        "ability": ability,
+                        "changes": [{"kind": "mp_spend", "amount": mp_cost, "value": ""}],
                     }
                 )
             elif ability == "CURE_WOUNDS" and target_id:
@@ -1890,12 +2369,29 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                         "changes": [{"kind": "healing", "amount": healing, "value": ""}],
                     }
                 )
+                state_targets.append(
+                    {
+                        "target_type": "player",
+                        "target_slot": int(actor.get("slot", 0) or 0),
+                        "target_id": actor_id,
+                        "actor_id": actor_id,
+                        "ability": ability,
+                        "changes": [{"kind": "mp_spend", "amount": mp_cost, "value": ""}],
+                    }
+                )
             results.append(result)
             continue
 
         if action_type == "SKILL":
-            skill_roll = perform_dice_roll("1d20+2", "skill check", actor_id)
-            rolls.append(skill_roll)
+            if actor_class_id == "Rogue":
+                first_roll = perform_dice_roll("1d20+2", "skill check advantage roll 1", actor_id)
+                second_roll = perform_dice_roll("1d20+2", "skill check advantage roll 2", actor_id)
+                rolls.extend([first_roll, second_roll])
+                skill_roll = first_roll if int(first_roll.get("total", 0) or 0) >= int(second_roll.get("total", 0) or 0) else second_roll
+                skill_roll = {**skill_roll, "label": "skill check advantage result", "advantage": True}
+            else:
+                skill_roll = perform_dice_roll("1d20+2", "skill check", actor_id)
+                rolls.append(skill_roll)
             total = int(skill_roll.get("total", 0) or 0)
             result.update(
                 {
@@ -1911,6 +2407,24 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
 
         results.append(result)
 
+    visible_living_monsters = [
+        monster
+        for monster in context["visible_monsters"]
+        if _is_living_target(monster)
+    ]
+    damage_by_monster_id: dict[str, int] = {}
+    for target in state_targets:
+        if str(target.get("target_type", "") or "") != "monster":
+            continue
+        target_id = str(target.get("target_id", "") or "")
+        for change in target.get("changes", []):
+            if str(change.get("kind", "") or "") == "damage":
+                damage_by_monster_id[target_id] = damage_by_monster_id.get(target_id, 0) + int(change.get("amount", 0) or 0)
+    combat_ended = bool(visible_living_monsters) and all(
+        max(0, int(monster.get("current_hp", 0) or 0) - damage_by_monster_id.get(str(monster.get("target_id", "") or ""), 0)) <= 0
+        for monster in visible_living_monsters
+    )
+
     return {
         "results": results,
         "rolls": rolls,
@@ -1918,6 +2432,12 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
         "retry_required": False,
         "errors": [],
         "viable_targets": viable_targets,
+        "combat_ended": combat_ended,
+        "combat_end_guidance": (
+            "This action defeats the last living Opposition target and ends the combat. Narrate the end of the battle, usually with celebration or relief, and show concern for any fallen or badly wounded allies."
+            if combat_ended
+            else ""
+        ),
     }
 
 
@@ -2481,7 +3001,33 @@ def _apply_generation_result(db: Session, session: SessionModel, agent_slot: int
             )
         )
 
+    tool_mechanical_removes: dict[str, list[int]] = {}
+    tool_mechanical_adds: dict[str, list[int]] = {}
+    for payload in generation.pending_state_changes:
+        if payload.get("source", "tool") != "tool":
+            continue
+        for target in payload.get("targets", []):
+            slot = int(target.get("target_slot", agent_slot) or agent_slot)
+            for change in target.get("changes", []):
+                value = str(change.get("value", "") or "")
+                if not _is_mechanical_consumable_item(value):
+                    continue
+                kind = str(change.get("kind", "") or "")
+                normalized_value = _normalize_inventory_item_text(value)
+                if kind == "inventory_remove":
+                    tool_mechanical_removes.setdefault(normalized_value, []).append(slot)
+                elif kind == "inventory_add":
+                    tool_mechanical_adds.setdefault(normalized_value, []).append(slot)
+
     seen_state_change_keys: set[tuple[str, str, int, str, int, str]] = set()
+    action_consumed_items = {
+        _normalize_inventory_item_text(str(change.get("value", "") or ""))
+        for payload in generation.pending_state_changes
+        if payload.get("source") == "resolve_action"
+        for target in payload.get("targets", [])
+        for change in target.get("changes", [])
+        if str(change.get("kind", "") or "") == "inventory_remove" and _is_mechanical_consumable_item(str(change.get("value", "") or ""))
+    }
     for payload in generation.pending_state_changes:
         source = payload.get("source", "tool")
         for target in payload.get("targets", []):
@@ -2490,6 +3036,16 @@ def _apply_generation_result(db: Session, session: SessionModel, agent_slot: int
                 kind = str(change.get("kind", "") or "")
                 amount = int(change.get("amount", 0) or 0)
                 value = str(change.get("value", "") or "")
+                normalized_value = _normalize_inventory_item_text(value)
+                if source == "tool" and target_type == "player" and _is_mechanical_consumable_item(value):
+                    slot = int(target.get("target_slot", agent_slot) or agent_slot)
+                    remove_slots = tool_mechanical_removes.get(normalized_value, [])
+                    add_slots = tool_mechanical_adds.get(normalized_value, [])
+                    same_slot_noop = slot in remove_slots and slot in add_slots
+                    transfer_to_other_slot = kind == "inventory_remove" and any(add_slot != slot for add_slot in add_slots)
+                    transfer_from_other_slot = kind == "inventory_add" and any(remove_slot != slot for remove_slot in remove_slots)
+                    if normalized_value in action_consumed_items or same_slot_noop or not (transfer_to_other_slot or transfer_from_other_slot):
+                        continue
                 state_key = (
                     target_type,
                     str(target.get("target_id", "") or ""),
@@ -2671,21 +3227,55 @@ def _append_state_change(
     slot = int(target_slot)
     name = session.agent_names.get(str(slot), _default_name(slot))
     if kind == "damage" and amount > 0:
+        current_state = derive_party_state(db, session.session_id).get(str(slot), {})
+        if "Rage" in current_state.get("status_effects", []):
+            amount = amount // 2
         _append_system_event(db, session.session_id, prompt_index, EventKind.DAMAGE_APPLIED, f"{name} takes {amount} damage.", {"target_type": "player", "target_slot": slot, "amount": amount, "source": source})
     elif kind == "healing" and amount > 0:
         hp_before = int(derive_party_state(db, session.session_id).get(str(slot), {}).get("hp_current", 0) or 0)
         _append_system_event(db, session.session_id, prompt_index, EventKind.DAMAGE_APPLIED, f"{name} heals {amount} HP.", {"target_type": "player", "target_slot": slot, "amount": -amount, "source": source})
         if hp_before <= 0:
             _mark_revived_combatant_turn_spent_if_passed(session, slot)
+    elif kind == "mp_spend" and amount > 0:
+        _append_system_event(db, session.session_id, prompt_index, EventKind.RESOURCE_CHANGED, f"{name} spends {amount} MP.", {"target_type": "player", "target_slot": slot, "resource": "mp", "amount": -amount, "source": source})
+    elif kind == "mp_restore" and amount > 0:
+        _append_system_event(db, session.session_id, prompt_index, EventKind.RESOURCE_CHANGED, f"{name} restores {amount} MP.", {"target_type": "player", "target_slot": slot, "resource": "mp", "amount": amount, "source": source})
+    elif kind == "feature_use" and value:
+        _append_system_event(db, session.session_id, prompt_index, EventKind.RESOURCE_CHANGED, f"{name} uses {value.replace('_', ' ')}.", {"target_type": "player", "target_slot": slot, "resource": "feature", "feature": value, "amount": amount or 1, "source": source})
     elif kind == "status_add" and value:
         _append_system_event(db, session.session_id, prompt_index, EventKind.CONDITION_ADDED, f"{name} gains status: {value}.", {"target_type": "player", "target_slot": slot, "status": value, "source": source})
     elif kind == "status_remove" and value:
         _append_system_event(db, session.session_id, prompt_index, EventKind.CONDITION_REMOVED, f"{name} loses status: {value}.", {"target_type": "player", "target_slot": slot, "status": value, "source": source})
     elif kind == "inventory_add" and value:
+        duplicate_this_prompt = False
+        pending_events = [
+            item
+            for item in db.new
+            if isinstance(item, Event)
+            and item.session_id == session.session_id
+            and item.prompt_index == prompt_index
+            and item.kind == EventKind.INVENTORY_GAINED
+            and (item.json_payload or {}).get("target_slot") == slot
+        ]
+        existing_prompt_events = db.execute(
+            select(Event).where(
+                Event.session_id == session.session_id,
+                Event.prompt_index == prompt_index,
+                Event.kind == EventKind.INVENTORY_GAINED,
+            )
+        ).scalars().all()
+        for event in [*pending_events, *existing_prompt_events]:
+            payload = event.json_payload or {}
+            if payload.get("target_slot") == slot and _inventory_items_overlap(str(payload.get("item", "")), value):
+                duplicate_this_prompt = True
+                break
+        if duplicate_this_prompt:
+            return
         current_inventory = derive_party_state(db, session.session_id).get(str(slot), {}).get("inventory", [])
-        if any(_inventory_items_overlap(existing, value) for existing in current_inventory):
+        if any(_inventory_items_overlap(existing, value) for existing in current_inventory) and not _is_stackable_inventory_item(value):
             return
         _append_system_event(db, session.session_id, prompt_index, EventKind.INVENTORY_GAINED, f"{name} gains {value}.", {"target_type": "player", "target_slot": slot, "item": value, "source": source})
+        db.flush()
     elif kind == "inventory_remove" and value:
         item_name, item_count = _split_inventory_stack(value)
         consumed_item = item_name if source in {"use_item", "resolve_action"} and item_count > 1 else value
@@ -2723,6 +3313,20 @@ def _dismiss_opposition_state(db: Session, session: SessionModel, prompt_index: 
     session.selected_agent_slots = [slot for slot in session.selected_agent_slots if slot != OPPOSITION_AGENT_SLOT]
     session.agent_names.pop(str(OPPOSITION_AGENT_SLOT), None)
     session.combat_state = _empty_combat_state()
+    party_state = derive_party_state(db, session.session_id)
+    for slot_text, member_state in party_state.items():
+        for status in COMBAT_DURATION_STATUSES:
+            if status in member_state.get("status_effects", []):
+                _append_state_change(
+                    db,
+                    session,
+                    prompt_index,
+                    target_type="player",
+                    target_slot=int(slot_text),
+                    kind="status_remove",
+                    value=status,
+                    source="combat_cleanup",
+                )
     encounter_state = copy.deepcopy(session.encounter_state or {})
     if encounter_state.get("encounter_type") == "combat":
         encounter_state["active"] = False
@@ -3248,6 +3852,26 @@ def take_long_rest(db: Session, session_id: str) -> SessionModel:
     current_party_state = derive_party_state(db, session_id)
     session.prompt_index += 1
     prompt_index = session.prompt_index
+    adventure_id = str((session.mission_objective_state or {}).get("adventure_id", "") or tab1.adventure_id or "")
+    active_adventure_rest = bool(adventure_id and session.current_location_id and not (session.mission_objective_state or {}).get("complete"))
+    if active_adventure_rest:
+        roll = perform_dice_roll("1d100", "Long rest safety", "party")
+        success = int(roll.get("total", 0) or 0) <= 50
+        _append_system_event(db, session_id, prompt_index, EventKind.DICE_ROLL, f"Long rest safety: {roll['total']}", {**roll, "source": "long_rest", "success": success, "dc": 50})
+        if not success:
+            monsters = LONG_REST_AMBUSHES.get(adventure_id, ["Bandit", "Bandit"])
+            _append_system_event(
+                db,
+                session_id,
+                prompt_index,
+                EventKind.TRANSCRIPT,
+                f"Long rest failed. The party is ambushed while attempting to rest: {', '.join(monsters)}.",
+                {"source": "long_rest", "success": False, "ambush_monsters": monsters},
+            )
+            _spawn_opposition_group(db, session, monsters, prompt_index, source="long_rest_ambush")
+            db.commit()
+            db.refresh(session)
+            return session
 
     db.add(
         Event(
@@ -3278,6 +3902,19 @@ def take_long_rest(db: Session, session_id: str) -> SessionModel:
                 target_slot=slot,
                 kind="healing",
                 amount=healing,
+                source="long_rest",
+            )
+        mp_current = int(current_party_state.get(str(slot), {}).get("mp_current", _mp_max_for_class(class_id)) or 0)
+        mp_restore = max(0, _mp_max_for_class(class_id) - mp_current)
+        if mp_restore > 0:
+            _append_state_change(
+                db,
+                session,
+                prompt_index,
+                target_type="player",
+                target_slot=slot,
+                kind="mp_restore",
+                amount=mp_restore,
                 source="long_rest",
             )
 
@@ -3363,6 +4000,33 @@ def dismiss_opposition(db: Session, session_id: str) -> SessionModel:
     _ensure_nonblocking_opposition_state(db, session)
     if not (session.opposition_state or {}).get("active"):
         raise ValueError("No active Opposition to dismiss")
+    if (session.combat_state or {}).get("in_combat"):
+        opposition_state = copy.deepcopy(session.opposition_state or _empty_opposition_state())
+        if opposition_state.get("flee_failed"):
+            raise ValueError("Flee has already failed for this combat.")
+        session.prompt_index += 1
+        prompt_index = session.prompt_index
+        roll = perform_dice_roll("1d100", "Flee attempt", "party")
+        success = int(roll.get("total", 0) or 0) <= 50
+        _append_system_event(db, session_id, prompt_index, EventKind.DICE_ROLL, f"Flee attempt: {roll['total']}", {**roll, "source": "flee_attempt", "success": success, "dc": 50})
+        if success:
+            _append_system_event(db, session_id, prompt_index, EventKind.TRANSCRIPT, "The party successfully flees the combat.", {"source": "flee_attempt", "success": True})
+            _dismiss_opposition_state(db, session, prompt_index, reason="flee_success")
+        else:
+            opposition_state["flee_failed"] = True
+            session.opposition_state = opposition_state
+            combat = copy.deepcopy(session.combat_state or _empty_combat_state())
+            full_order = _canonical_combat_order(combat)
+            if OPPOSITION_INITIATIVE_ID in full_order:
+                combat["turn_index"] = full_order.index(OPPOSITION_INITIATIVE_ID)
+                combat["acted_this_round"] = {combatant_id: True for combatant_id in full_order if combatant_id.startswith("pc:")}
+                combat["acted_this_round"][OPPOSITION_INITIATIVE_ID] = False
+                combat["initiative_order"] = full_order
+                session.combat_state = combat
+            _append_system_event(db, session_id, prompt_index, EventKind.TRANSCRIPT, "The party fails to flee. The attempt exposes them, and Opposition takes the next turn.", {"source": "flee_attempt", "success": False})
+        db.commit()
+        db.refresh(session)
+        return session
     _dismiss_opposition_state(db, session, session.prompt_index, reason="manual")
     db.commit()
     db.refresh(session)
@@ -3543,12 +4207,28 @@ def use_item(db: Session, session_id: str, agent_slot: int, item_name: str, targ
                 target_slot = int(target_id.replace("pc:", ""))
             except ValueError:
                 target_slot = agent_slot
+        heal_roll = perform_dice_roll("2d4+2", "Potion of Healing", f"pc:{agent_slot}")
+        _append_system_event(db, session_id, prompt_index, EventKind.DICE_ROLL, f"Potion of Healing: {heal_roll['total']}", heal_roll)
         _append_state_change(db, session, prompt_index, target_type="player", target_slot=agent_slot, kind="inventory_remove", value=matched_item, source="use_item")
-        _append_state_change(db, session, prompt_index, target_type="player", target_slot=target_slot, kind="healing", amount=10, source="use_item")
-        text = f"{name} uses {used_item_label}, restoring 10 HP."
+        _append_state_change(db, session, prompt_index, target_type="player", target_slot=target_slot, kind="healing", amount=int(heal_roll["total"]), source="use_item")
+        target_name = session.agent_names.get(str(target_slot), _default_name(target_slot))
+        text = f"{name} uses {used_item_label} on {target_name}, restoring {heal_roll['total']} HP."
     elif "spell restore" in lowered or "mp potion" in lowered:
+        target_slot = agent_slot
+        if target_id.startswith("pc:"):
+            try:
+                target_slot = int(target_id.replace("pc:", ""))
+            except ValueError:
+                target_slot = agent_slot
+        target_state = party_state.get(str(target_slot), {})
+        if int(target_state.get("mp_max", 0) or 0) <= 0:
+            raise ValueError("Potion of Spell Restore only works on Cleric, Druid, or Wizard targets.")
+        restore = min(5, max(0, int(target_state.get("mp_max", 0) or 0) - int(target_state.get("mp_current", 0) or 0)))
         _append_state_change(db, session, prompt_index, target_type="player", target_slot=agent_slot, kind="inventory_remove", value=matched_item, source="use_item")
-        text = f"{name} uses {used_item_label}. MP restoration will apply once the MP system is active."
+        if restore > 0:
+            _append_state_change(db, session, prompt_index, target_type="player", target_slot=target_slot, kind="mp_restore", amount=restore, source="use_item")
+        target_name = session.agent_names.get(str(target_slot), _default_name(target_slot))
+        text = f"{name} uses {used_item_label} on {target_name}, restoring {restore} MP."
     elif "fireball scroll" in lowered:
         tab1 = get_tab1_or_create(db, session_id)
         if _class_assignment_for_slot(tab1, agent_slot) != "Wizard":
@@ -3926,14 +4606,21 @@ def derive_party_state(db: Session, session_id: str) -> dict[str, dict]:
         if not player_id or not class_id:
             continue
         class_data = CLASSES[class_id]
+        mp_max = _mp_max_for_class(class_id)
         state[str(slot)] = {
             "hp_current": class_data["hp_max"],
+            "mp_current": mp_max,
+            "mp_max": mp_max,
             "status_effects": [],
+            "class_features": _class_feature_summaries(class_id),
+            "feature_uses": {},
+            "current_combat_feature_uses": {},
             "inventory": _starting_inventory(player_id, class_id),
             "initiative": session.combat_state.get("initiative_values", {}).get(f"pc:{slot}"),
         }
 
     events = db.execute(select(Event).where(Event.session_id == session_id).order_by(Event.created_at.asc())).scalars().all()
+    last_combat_prompt_index = max((event.prompt_index for event in events if event.kind == EventKind.OPPOSITION_SPAWNED), default=0)
     seen_state_events: set[tuple] = set()
     for event in events:
         payload = event.json_payload or {}
@@ -3952,6 +4639,8 @@ def derive_party_state(db: Session, session_id: str) -> dict[str, dict]:
             dedupe_key = (event.prompt_index, event.kind.value, slot, payload.get("status", ""))
         elif event.kind in {EventKind.INVENTORY_GAINED, EventKind.INVENTORY_LOST}:
             dedupe_key = (event.prompt_index, event.kind.value, slot, payload.get("item", ""))
+        elif event.kind == EventKind.RESOURCE_CHANGED:
+            dedupe_key = (event.prompt_index, event.kind.value, slot, payload.get("resource", ""), payload.get("feature", ""), int(payload.get("amount", 0)))
         if dedupe_key is not None:
             if dedupe_key in seen_state_events:
                 continue
@@ -3970,11 +4659,21 @@ def derive_party_state(db: Session, session_id: str) -> dict[str, dict]:
         elif event.kind == EventKind.INVENTORY_GAINED:
             item = payload.get("item", "")
             if item:
-                state[key]["inventory"].append(item)
+                state[key]["inventory"] = _add_inventory_item_once(state[key]["inventory"], item)
         elif event.kind == EventKind.INVENTORY_LOST:
             item = payload.get("item", "")
             if item:
                 state[key]["inventory"] = _remove_inventory_item_once(state[key]["inventory"], item)
+        elif event.kind == EventKind.RESOURCE_CHANGED and payload.get("resource") == "mp":
+            amount = int(payload.get("amount", 0) or 0)
+            mp_max = int(state[key].get("mp_max", 0) or 0)
+            state[key]["mp_current"] = max(0, min(mp_max, int(state[key].get("mp_current", 0) or 0) + amount))
+        elif event.kind == EventKind.RESOURCE_CHANGED and payload.get("resource") == "feature":
+            feature = str(payload.get("feature", "") or "").lower()
+            if feature:
+                state[key]["feature_uses"][feature] = int(state[key]["feature_uses"].get(feature, 0) or 0) + int(payload.get("amount", 1) or 1)
+                if event.prompt_index >= last_combat_prompt_index:
+                    state[key]["current_combat_feature_uses"][feature] = int(state[key]["current_combat_feature_uses"].get(feature, 0) or 0) + int(payload.get("amount", 1) or 1)
     return state
 
 

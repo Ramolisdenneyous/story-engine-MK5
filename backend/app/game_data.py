@@ -103,7 +103,10 @@ CLASSES = {
         "hp_max": 12,
         "armor_class": 18,
         "speed": 30,
-        "features": ["Fighting Style - Protection", "Second Wind"],
+        "class_prompt_guidance": [
+            "Use Cleave when two enemies are alive and the GM wants a multi-target strike: call resolve_action with up to two Longsword or CLEAVE attacks, each against a different target. Never target the same enemy twice with Cleave.",
+        ],
+        "features": ["Cleave", "Fighting Style - Protection", "Second Wind"],
         "weapons": ["Longsword", "Handaxe"],
         "attack_profiles": [
             {"name": "Longsword", "attack_formula": "1d20+5", "damage_formula": "1d8+3", "damage_type": "slashing", "range": "melee"},
@@ -125,6 +128,9 @@ CLASSES = {
         "hp_max": 15,
         "armor_class": 15,
         "speed": 30,
+        "class_prompt_guidance": [
+            "Use Rage only in combat. Rage is a bonus action with 2 uses per adventure; call resolve_action with RAGE targeting yourself. While active for the combat, your attacks gain +2 damage and incoming damage is halved by the backend.",
+        ],
         "features": ["Rage", "Unarmored Defense"],
         "weapons": ["Greataxe", "Handaxes"],
         "attack_profiles": [
@@ -142,7 +148,11 @@ CLASSES = {
         "hp_max": 9,
         "armor_class": 15,
         "speed": 30,
-        "features": ["Sneak Attack", "Expertise", "Thieves' Cant"],
+        "class_prompt_guidance": [
+            "Skill Expert is passive: all skill checks roll with advantage in the backend.",
+            "Sneak Attack is passive: when you attack an enemy already damaged in the same combat, backend doubles your rolled damage once on that turn. Do not invent extra sneak attack dice.",
+        ],
+        "features": ["Sneak Attack", "Skill Expert", "Thieves' Cant"],
         "weapons": ["Rapier", "Shortbow"],
         "attack_profiles": [
             {"name": "Rapier", "attack_formula": "1d20+5", "damage_formula": "1d8+3", "damage_type": "piercing", "range": "melee"},
@@ -159,7 +169,10 @@ CLASSES = {
         "hp_max": 12,
         "armor_class": 15,
         "speed": 30,
-        "features": ["Favored Enemy", "Natural Explorer"],
+        "class_prompt_guidance": [
+            "Use Double Nock when the GM wants focused ranged pressure: call resolve_action with up to two Longbow or DOUBLE_NOCK attacks against the same target. Both attacks roll separately.",
+        ],
+        "features": ["Double Nock", "Favored Enemy", "Natural Explorer"],
         "weapons": ["Longbow", "Shortswords"],
         "attack_profiles": [
             {"name": "Longbow", "attack_formula": "1d20+5", "damage_formula": "1d8+3", "damage_type": "piercing", "range": "ranged"},
@@ -176,7 +189,11 @@ CLASSES = {
         "hp_max": 12,
         "armor_class": 18,
         "speed": 30,
-        "features": ["Divine Sense", "Lay on Hands"],
+        "class_prompt_guidance": [
+            "Smite is once per combat: call resolve_action with SMITE before attacking; the backend rolls a normal Longsword attack and adds 2d8 damage on hit.",
+            "Lay on Hands is once per combat and only in combat: call resolve_action with LAY_ON_HANDS targeting an injured player to restore 5 HP.",
+        ],
+        "features": ["Smite", "Lay on Hands", "Divine Sense"],
         "weapons": ["Longsword", "Javelins"],
         "attack_profiles": [
             {"name": "Longsword", "attack_formula": "1d20+5", "damage_formula": "1d8+3", "damage_type": "slashing", "range": "melee"},
@@ -192,12 +209,15 @@ CLASSES = {
         "class_prompt_guidance": [
             "Use healing magic with restraint and purpose.",
             "As a default tactical rule, only use healing spells on allies who are below half of their maximum HP, unless the GM gives a specific reason to heal someone else.",
+            "Use the MK5 Spell MP system: Cure Wounds and Bless each cost 1 MP, you start with 6 MP, long rests and Potion of Spell Restore recover MP, and you should warn the GM when you are down to 1 MP.",
+            "Bless is combat-only and affects the party for the whole combat: call resolve_action with BLESS. The backend applies +2 to attack rolls and damage.",
         ],
         "ability_scores": {"STR": 13, "DEX": 11, "CON": 14, "INT": 10, "WIS": 16, "CHA": 15},
         "hp_max": 10,
+        "mp_max": 6,
         "armor_class": 18,
         "speed": 30,
-        "features": ["Spellcasting", "Divine Domain"],
+        "features": ["Spellcasting", "Bless", "Divine Domain"],
         "weapons": ["Mace"],
         "attack_profiles": [
             {"name": "Mace", "attack_formula": "1d20+3", "damage_formula": "1d6+1", "damage_type": "bludgeoning", "range": "melee"},
@@ -212,12 +232,15 @@ CLASSES = {
         "class_prompt_guidance": [
             "Use healing magic with restraint and purpose.",
             "As a default tactical rule, only use healing spells on allies who are below half of their maximum HP, unless the GM gives a specific reason to heal someone else.",
+            "Use the MK5 Spell MP system: Cure Wounds and Thunderwave each cost 1 MP, you start with 6 MP, long rests and Potion of Spell Restore recover MP, and you should warn the GM when you are down to 1 MP.",
+            "Thunderwave attacks all living Opposition targets: call resolve_action with THUNDERWAVE. The backend rolls separately for each target and applies 2d8 damage on each hit.",
         ],
         "ability_scores": {"STR": 11, "DEX": 13, "CON": 14, "INT": 10, "WIS": 16, "CHA": 15},
         "hp_max": 10,
+        "mp_max": 6,
         "armor_class": 14,
         "speed": 30,
-        "features": ["Spellcasting", "Druidic"],
+        "features": ["Spellcasting", "Thunderwave", "Druidic"],
         "weapons": ["Scimitar", "Quarterstaff"],
         "attack_profiles": [
             {"name": "Scimitar", "attack_formula": "1d20+3", "damage_formula": "1d6+1", "damage_type": "slashing", "range": "melee"},
@@ -230,11 +253,17 @@ CLASSES = {
         "class_id": "Wizard",
         "name": "Wizard",
         "role": "Arcane strategist who manipulates the battlefield through versatile spells and tactical control.",
+        "class_prompt_guidance": [
+            "Use the MK5 Spell MP system: Magic Missile and Burning Hands each cost 1 MP, Firebolt costs 0 MP, you start with 6 MP, long rests and Potion of Spell Restore recover MP, and you should warn the GM when you are down to 1 MP.",
+            "Firebolt is a reliable free attack spell: call resolve_action with FIREBOLT against one target. The backend rolls 1d20+10 to hit and 1d10 fire damage.",
+            "Burning Hands attacks all living Opposition targets: call resolve_action with BURNING_HANDS. The backend rolls separately for each target and applies 3d6 fire damage on each hit.",
+        ],
         "ability_scores": {"STR": 9, "DEX": 14, "CON": 13, "INT": 16, "WIS": 12, "CHA": 11},
         "hp_max": 8,
+        "mp_max": 6,
         "armor_class": 12,
         "speed": 30,
-        "features": ["Spellcasting", "Arcane Recovery"],
+        "features": ["Spellcasting", "Firebolt", "Burning Hands", "Arcane Recovery"],
         "weapons": ["Quarterstaff"],
         "attack_profiles": [
             {"name": "Quarterstaff", "attack_formula": "1d20+1", "damage_formula": "1d6-1", "damage_type": "bludgeoning", "range": "melee"},

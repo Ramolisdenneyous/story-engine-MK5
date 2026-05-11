@@ -34,7 +34,7 @@ type GmPromptPanelProps = {
   onTriggerEncounter: () => void;
   onFleeEncounter: () => void;
   onSearchLocation: () => void;
-  onUseItem: (itemName: string) => void;
+  onUseItem: (itemName: string, targetId?: string) => void;
   onEndChapter: () => void;
   gameOver: boolean;
   onStartOver: () => void;
@@ -42,7 +42,10 @@ type GmPromptPanelProps = {
 
 function agentTooltip(member: SessionDetail["tab1"]["party"][number]) {
   const inventory = member.inventory.length ? member.inventory.join(", ") : "No listed inventory";
-  return `HP ${member.hp_current}/${member.hp_max} | Inventory: ${inventory}`;
+  const mp = member.mp_max > 0 ? ` | MP ${member.mp_current}/${member.mp_max}` : "";
+  const features = member.class_features.length ? ` | Features: ${member.class_features.join("; ")}` : "";
+  const statuses = member.status_effects.length ? ` | Active: ${member.status_effects.join(", ")}` : "";
+  return `HP ${member.hp_current}/${member.hp_max}${mp}${statuses}${features} | Inventory: ${inventory}`;
 }
 
 function activeCombatantIdForDetail(detail: SessionDetail): string {
@@ -131,6 +134,18 @@ export function GmPromptPanel({
     const lowered = item.toLowerCase();
     return lowered.includes("healing") || lowered.includes("spell restore") || lowered.includes("fireball scroll");
   }) ?? [];
+  const itemUseOptions = usableItems.flatMap((item) => {
+    const lowered = item.toLowerCase();
+    if (lowered.includes("fireball scroll")) return [{ label: item, itemName: item, targetId: "" }];
+    if (lowered.includes("spell restore")) {
+      return detail.tab1.party
+        .filter((member) => member.mp_max > 0)
+        .map((member) => ({ label: `${item} -> ${member.player_name}`, itemName: item, targetId: `pc:${member.slot}` }));
+    }
+    return detail.tab1.party
+      .filter((member) => member.hp_current < member.hp_max)
+      .map((member) => ({ label: `${item} -> ${member.player_name}`, itemName: item, targetId: `pc:${member.slot}` }));
+  });
 
   return (
     <>
@@ -218,6 +233,9 @@ export function GmPromptPanel({
                 <div key={member.slot} className={member.hp_current <= 0 ? "party-summary-chip disabled" : "party-summary-chip"}>
                   <strong>{member.player_name}</strong>
                   <span>HP {member.hp_current}/{member.hp_max}</span>
+                  {member.mp_max > 0 && <span>MP {member.mp_current}/{member.mp_max}</span>}
+                  {member.status_effects.length > 0 && <span>Active: {member.status_effects.join(", ")}</span>}
+                  {member.class_features.length > 0 && <span>{member.class_features.join(" | ")}</span>}
                   <span>{member.inventory.length ? member.inventory.join(", ") : "No listed inventory"}</span>
                 </div>
               ))}
@@ -232,7 +250,8 @@ export function GmPromptPanel({
               ].filter(Boolean).join(" ")}
               type="button"
               onClick={activeOpposition?.active ? onFleeEncounter : onOpenEncounterModal}
-              disabled={loading || animationLocked || (!activeOpposition?.active && gmMonsters.length === 0)}
+              disabled={loading || animationLocked || Boolean(activeOpposition?.flee_failed) || (!activeOpposition?.active && gmMonsters.length === 0)}
+              title={activeOpposition?.flee_failed ? "Flee has already failed for this combat." : ""}
             >
               {encounterButtonLabel}
             </button>
@@ -250,19 +269,22 @@ export function GmPromptPanel({
                 Search Location
               </button>
             )}
-            {usableItems.length > 0 && (
+            {itemUseOptions.length > 0 && (
               <select
                 className="item-use-select"
                 value=""
                 onChange={(event) => {
-                  if (event.target.value) onUseItem(event.target.value);
+                  if (event.target.value) {
+                    const [itemName, targetId = ""] = event.target.value.split("||");
+                    onUseItem(itemName, targetId);
+                  }
                 }}
                 disabled={loading || animationLocked || !canPrompt}
                 title="Use item"
               >
                 <option value="">Use item...</option>
-                {usableItems.map((item, index) => (
-                  <option key={`${item}-${index}`} value={item}>{item}</option>
+                {itemUseOptions.map((option, index) => (
+                  <option key={`${option.itemName}-${option.targetId}-${index}`} value={`${option.itemName}||${option.targetId}`}>{option.label}</option>
                 ))}
               </select>
             )}

@@ -356,7 +356,7 @@ export function App() {
   const transcript = useMemo(() => {
     if (!detail) return [];
     return detail.events
-      .filter((event) => event.kind === "transcript" || event.kind === "objective_updated" || event.kind === "inventory_gained" || event.kind === "inventory_lost")
+      .filter((event) => event.kind === "transcript" || event.kind === "objective_updated" || event.kind === "inventory_gained" || event.kind === "inventory_lost" || event.kind === "resource_changed")
       .map((event) => ({ ...event, text: sanitizeVisibleAgentText(event.text) }))
       .filter((event) => event.text.trim());
   }, [detail]);
@@ -997,14 +997,14 @@ export function App() {
     }
   }
 
-  async function useSelectedItem(itemName: string) {
+  async function useSelectedItem(itemName: string, targetId = "") {
     if (!sessionId || !itemName) return;
     setLoading(true);
     setError("");
     try {
       const sessionSummary = await api<SessionDetail["session"]>(`/session/${sessionId}/use-item`, {
         method: "POST",
-        body: JSON.stringify({ agent_slot: activeAgentSlot, item_name: itemName, target_id: `pc:${activeAgentSlot}` }),
+        body: JSON.stringify({ agent_slot: activeAgentSlot, item_name: itemName, target_id: targetId || `pc:${activeAgentSlot}` }),
       });
       setDetail((current) => (current ? { ...current, session: sessionSummary } : current));
       await refresh();
@@ -1275,7 +1275,7 @@ export function App() {
             onTriggerEncounter={() => void triggerEncounter()}
             onFleeEncounter={() => void fleeEncounter()}
             onSearchLocation={() => void searchLocation()}
-            onUseItem={(itemName) => void useSelectedItem(itemName)}
+            onUseItem={(itemName, targetId) => void useSelectedItem(itemName, targetId)}
             onStartOver={startOver}
             displayAdventureTitle={displayAdventureTitle}
           />

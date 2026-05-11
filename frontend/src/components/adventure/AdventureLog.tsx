@@ -29,6 +29,7 @@ export function AdventureLog({
   const lineClass = (event: TranscriptEvent) => {
     if (event.kind === "objective_updated") return "transcript-line transcript-line--objective";
     if (event.kind === "inventory_gained" || event.kind === "inventory_lost") return "transcript-line transcript-line--inventory";
+    if (event.kind === "resource_changed") return "transcript-line transcript-line--inventory";
     return "transcript-line";
   };
 

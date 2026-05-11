@@ -34,17 +34,20 @@ DECLARED_BUT_UNROLLED_ACTION_RE = re.compile(
     r"\bi attack\b|"
     r"\bi(?:'m| am)\s+going to attack\b|"
     r"\bi\s+(?:swing|strike|slash|shoot|fire|cast)\b|"
+    r"\bi\s+draw\s+back\s+(?:my\s+)?(?:bow|string|arrow|arrows)\b|"
+    r"\bi\s+(?:loose|release|let\s+loose)\s+(?:an?\s+)?(?:arrow|arrows|shot)\b|"
     r"\bhere goes nothing\b|"
     r"\blet'?s see if i can hit\b"
     r")",
     re.IGNORECASE,
 )
 ATTACK_RESOLUTION_RE = re.compile(
-    r"(attack lands|lands with a total of|\b(?:misses|hits|strikes|slashes|swings|charges|gore(?:s)?|bites?|slams?)\b)",
+    r"(attack lands|lands with a total of|go(?:es)? wide|fly wide|flies wide|sail(?:s)? wide|aim (?:is|was) off|"
+    r"\b(?:misses|hits|strikes|slashes|swings|shoots?|fires?|looses?|releases?|charges|gore(?:s)?|bites?|slams?)\b)",
     re.IGNORECASE,
 )
 MISS_RESOLUTION_RE = re.compile(
-    r"(\bmiss(?:es|ed)?\b|does\s+not\s+(?:hit|land)|fails?\s+to\s+hit|fails?\s+to\s+land|connects?\s+with\s+empty\s+air)",
+    r"(\bmiss(?:es|ed)?\b|go(?:es)? wide|fly wide|flies wide|sail(?:s)? wide|aim (?:is|was) off|does\s+not\s+(?:hit|land)|fails?\s+to\s+hit|fails?\s+to\s+land|connects?\s+with\s+empty\s+air)",
     re.IGNORECASE,
 )
 STATE_RESOLUTION_RE = re.compile(
@@ -543,6 +546,15 @@ class OpenAIProvider(LLMProvider):
             "QUARTERSTAFF",
             "MAGIC_MISSILE",
             "CURE_WOUNDS",
+            "CLEAVE",
+            "RAGE",
+            "DOUBLE_NOCK",
+            "SMITE",
+            "LAY_ON_HANDS",
+            "BLESS",
+            "THUNDERWAVE",
+            "FIREBOLT",
+            "BURNING_HANDS",
             "ATHLETICS",
             "PERCEPTION",
             "INVESTIGATION",
@@ -588,7 +600,7 @@ class OpenAIProvider(LLMProvider):
                 "type": "function",
                 "function": {
                     "name": "update_inventory",
-                    "description": "Record authoritative inventory changes only. Do not use this for HP, healing, conditions, or combat resolution.",
+                    "description": "Record authoritative inventory changes only. Do not use this for HP, healing, conditions, combat resolution, or consuming a healing item; healing items must use resolve_action.",
                     "parameters": {
                         "type": "object",
                         "additionalProperties": False,

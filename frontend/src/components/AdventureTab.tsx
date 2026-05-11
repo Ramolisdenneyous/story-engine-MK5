@@ -73,7 +73,7 @@ type AdventureTabProps = {
   onTriggerEncounter: () => void;
   onFleeEncounter: () => void;
   onSearchLocation: () => void;
-  onUseItem: (itemName: string) => void;
+  onUseItem: (itemName: string, targetId?: string) => void;
   onStartOver: () => void;
   displayAdventureTitle: (adventure: Adventure | null) => string;
 };

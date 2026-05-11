@@ -129,6 +129,7 @@ def _ensure_schema() -> None:
             "ALTER TYPE eventkind ADD VALUE IF NOT EXISTS 'MONSTER_DIED'",
             "ALTER TYPE eventkind ADD VALUE IF NOT EXISTS 'OPPOSITION_DISMISSED'",
             "ALTER TYPE eventkind ADD VALUE IF NOT EXISTS 'OBJECTIVE_UPDATED'",
+            "ALTER TYPE eventkind ADD VALUE IF NOT EXISTS 'RESOURCE_CHANGED'",
         ]
         for statement in enum_statements:
             try:

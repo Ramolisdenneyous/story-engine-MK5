@@ -607,6 +607,8 @@ export function LocationCell({
                     <strong>{member.player_name}</strong>
                     <span>{member.class_id}</span>
                     <span>HP {member.hp_current}/{member.hp_max}</span>
+                    {member.mp_max > 0 && <span>MP {member.mp_current}/{member.mp_max}</span>}
+                    {member.status_effects.length > 0 && <span>{member.status_effects.join(", ")}</span>}
                   </div>
                 </div>
               );
@@ -629,6 +631,8 @@ export function LocationCell({
                 <strong>{heldMember.player_name}</strong>
                 <span>Speaking</span>
                 <span>HP {heldMember.hp_current}/{heldMember.hp_max}</span>
+                {heldMember.mp_max > 0 && <span>MP {heldMember.mp_current}/{heldMember.mp_max}</span>}
+                {heldMember.status_effects.length > 0 && <span>{heldMember.status_effects.join(", ")}</span>}
               </div>
             </div>
           );

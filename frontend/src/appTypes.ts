@@ -131,6 +131,7 @@ export type OppositionState = {
   monster_stats: Record<string, unknown>;
   instances: OppositionMonsterInstance[];
   cleanup_after: string;
+  flee_failed?: boolean;
 };
 
 export type PartyMember = {
@@ -146,7 +147,12 @@ export type PartyMember = {
   armor_class: number;
   hp_max: number;
   hp_current: number;
+  mp_max: number;
+  mp_current: number;
   status_effects: string[];
+  class_features: string[];
+  feature_uses: Record<string, number>;
+  current_combat_feature_uses: Record<string, number>;
   inventory: string[];
   initiative: number | null;
 };

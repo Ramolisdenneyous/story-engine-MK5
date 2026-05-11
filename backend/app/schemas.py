@@ -37,7 +37,12 @@ class PartyMemberOut(BaseModel):
     armor_class: int
     hp_max: int
     hp_current: int
+    mp_max: int = 0
+    mp_current: int = 0
     status_effects: list[str]
+    class_features: list[str] = Field(default_factory=list)
+    feature_uses: dict[str, int] = Field(default_factory=dict)
+    current_combat_feature_uses: dict[str, int] = Field(default_factory=dict)
     inventory: list[str]
     initiative: int | None = None
 

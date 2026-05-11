@@ -1,188 +1,128 @@
 # Story Engine MK5
 
-Story Engine MK5 is the next local-first evolution of the Story Engine project. It starts from the stable MK4 live version and preserves the same GM-first gameplay core while creating room for the next round of product, UI, and engine improvements.
+Story Engine MK5 is the current development branch of the Story Engine project: a local-first, Game-Master-led adventure engine where AI agents play the party and opposition inside a backend-authoritative rules loop.
 
-The project is still centered on one core idea: the human user is the Game Master, and AI-controlled agents inhabit the party and respond inside a structured game loop. MK5 continues the work of making that loop feel clearer, faster, and more dependable in actual play.
+MK5 starts from the stable MK4 live baseline, but the direction has shifted from prototype flow-building into a fuller adventure system. The goal is no longer just "can agents respond in character?" The goal is "can a human GM run a structured adventure with AI party members while the backend keeps the rules honest?"
 
-## What MK5 Is Trying To Do
+## Project Direction
 
-MK5 is not an AI GM.
+Story Engine is not an AI GM.
 
-The design goal is:
-- the user directs the world as Game Master
-- AI agents respond as party members or as the opposition
-- game state is stored and resolved in the backend, not inferred from narrative prose
-- the frontend presents the active mission, location, party state, combat state, and transcript in a compact play surface
-- the chapter can still be summarized and rewritten into a narrative draft at the end
+The human user remains the Game Master. The AI agents are characters inside the world: party members, opposition, and support agents that respond to the GM's prompts. The backend owns mechanical truth so the model's prose cannot quietly rewrite HP, inventory, quest progress, combat state, or travel rules.
 
-## Current MK5 Focus
+MK5 is focused on:
 
-This repository now reflects the current MK5 direction, starting from the MK4 guided-onboarding baseline.
+- six structured Valaska adventures with location-based encounters
+- party agents with assigned classes, inventories, HP, MP, and class features
+- backend-resolved attacks, spells, skill checks, hazards, traps, loot, and quest progress
+- combat initiative with locked turn order and frontend turn gating
+- adventure-log feedback that explains important mechanical events to the user
+- backend context notices that tell player agents what encounter state they are in
+- a local Docker test loop that mirrors the live MK5 GitHub branch
 
-The inherited MK4 baseline pushed the project toward:
-- backend-authoritative combat resolution
-- two-phase prompt flow for faster combat feel
-- improved local docker hosting for MK4 only
-- a reorganized frontend with split adventure components instead of one oversized `App.tsx`
-- mission preview and location-image support across the UI
-- card-based party and opposition presentation in the Encounter Location view
-- frontend combat overlays and death animation support driven by backend events
-- stronger guardrails around invalid tool calls and stale combat targets
-- opposition batch-action stability improvements (deduped action and event handling)
-- completed Phase 7 mission-objective integration across all six adventures
+## Current MK5 Systems
 
-## Major Architecture Changes
+### Adventure Content
 
-### Backend-Authoritative Resolution
+MK5 now contains six playable adventures:
 
-One of the biggest architectural changes in MK4 is that combat and healing state are now resolved from backend tool results, not scraped or reconstructed from the model's visible narration.
+- To Follow the King's Way
+- Nightmares of the Thawed
+- The Dead Remember
+- Collecting What's Owed
+- Memories of the Witch King
+- Blood at Midnight
 
-The intended order is:
-1. GM sends a prompt
-2. backend calls the LLM
-3. LLM uses tool calls such as `resolve_action`
-4. backend rolls dice, resolves hit or miss, applies HP changes, updates combat state, and emits system events
-5. frontend can begin animation from those backend events
-6. the LLM produces visible narration after tool resolution
+Adventure locations can define combat encounters, traps, hazards, stealth infiltration checks, search loot, quest-gated travel, and mission-completion conditions.
 
-This keeps the game state authoritative and reduces a whole class of sync bugs that come from trusting prose.
+### Backend-Authoritative Mechanics
 
-### Two-Phase Prompt Flow
+The backend resolves mechanical actions through tool calls such as `resolve_action`.
 
-Prompts now have two possible modes:
+The intended turn flow is:
 
-- simple single-phase mode:
-  - used when no gameplay tool call is needed
-  - the prompt returns normally with no animation trigger
-- two-phase mode:
-  - used when the LLM makes a gameplay tool call
-  - the backend immediately returns updated `system_events`
-  - the frontend starts combat animation right away
-  - the final narration is persisted afterward through a continuation pass
+1. The GM prompts an agent.
+2. The agent calls a backend tool for uncertain mechanics.
+3. The backend rolls dice, resolves results, applies state changes, and emits system events.
+4. The frontend displays those events and animations.
+5. The agent narrates only what the backend result supports.
 
-This change was made specifically to reduce the lag between action resolution and visible combat motion in the UI.
+This protects the game from model-invented hits, misses, healing, loot, or quest progress.
 
-### Safer Tool Retry Behavior
+### Combat
 
-The backend now does more than simply accept tool arguments at face value.
+Combat supports:
 
-It currently:
-- forces player actions to originate from the actually prompted player
-- canonicalizes fuzzy or slightly malformed target references where possible
-- rejects invalid actor or target references before applying state
-- returns viable live targets to the LLM when a target is invalid
-- allows the model to retry the tool call instead of narrating a broken action
-- rejects an entire invalid batch rather than partially applying half a turn
-- canonicalizes opposition attack abilities to real monster profiles to prevent false no-roll misses
-- deduplicates repeated action/state emissions before event persistence
+- initiative order for player agents and opposition
+- turn-locked prompting during combat
+- automatic encounter starts on travel
+- skipped turns for downed agents
+- restored turn participation after healing
+- combat-end cleanup and return to free agent selection
+- flee attempts
+- long rest outside active combat
+- frontend attack and death animations driven by backend events
 
-This is especially important for multi-monster combat and stale target references.
+Recent MK5 work hardened named multiattack features so malformed model calls still resolve correctly:
 
-### Frontend Sync Hardening
+- Fighter `CLEAVE` resolves up to two attacks against different living targets.
+- Ranger `DOUBLE_NOCK` resolves two attacks against the same target.
+- The backend canonicalizes malformed feature calls such as `action_type: "CLEAVE"` or `action_type: "DOUBLE_NOCK"`.
+- Multiattack animations are grouped so leftover attack events do not replay or lock the UI.
 
-Combat overlays are now protected against replay loops and stale backlog replays:
+### Classes And Resources
 
-- only the newest unresolved attack prompt group is animated
-- stale unresolved attack events are marked handled without replaying history
-- duplicate attack entries in the same prompt group are filtered before render
-- post-animation refresh remains backend-truth-first
+Player agents can be assigned classes with class-specific mechanics:
 
-TTS playback also includes timeout and abort recovery behavior so rapid prompting cannot wedge autoplay in a loading state.
+- Fighter: Cleave
+- Barbarian: Rage
+- Rogue: Skill Expert and Sneak Attack
+- Ranger: Double Nock
+- Paladin: Smite and Lay on Hands
+- Cleric: Bless and Cure Wounds
+- Druid: Thunderwave and Cure Wounds
+- Wizard: Firebolt, Burning Hands, Magic Missile, and scroll support
 
-## Current UI Structure
+MK5 also includes MP, spell-restoration potions, healing potions, stacked inventory items, and backend-protected item consumption.
 
-MK4 uses a three-tab flow:
+### Hazards, Traps, And Skill Checks
+
+Hazards and traps are now part of the adventure loop instead of being separate UI-only interactions.
+
+The Adventure Log gives the user a narrated description of what is happening. Backend context gives the player agents explicit mechanical instructions, such as which skill check is needed and what failure means. The user prompts agents to engage with hazards naturally rather than pressing a special challenge button.
+
+### Quest Progress And Loot
+
+Mission objectives now update from backend-resolved events rather than narration. Combat kills, search rewards, gold drops, boss defeats, and location-specific items are tracked through backend state and Adventure Log entries.
+
+Loot and inventory changes are also fed back into backend context so agents can reason about what they actually have.
+
+## UI Direction
+
+MK5 keeps the three-tab structure:
 
 ### Tab 1: Preparation
 
-Used to set up the adventure before play begins.
-
-Current preparation flow includes:
-- Valaska preset boot data
-- adventure selection
-- four-player selection
-- class assignment
-- chapter start and tab lock
+- choose an adventure
+- select four player agents
+- assign classes
+- start and lock the chapter
 
 ### Tab 2: Adventure
 
-This is the main play surface.
+The main play surface includes:
 
-The current layout is built around:
-- `AdventureLog`
-  - transcript display
-  - TTS playback controls
-- `LocationCell`
-  - world map
-  - adventure map
-  - encounter location image
-  - party card stack
-  - opposition card display
-  - combat overlay animations
-- `GmPromptPanel`
-  - active agent selection
-  - GM prompt input
-  - enter-to-send support
-  - encounter trigger and flee controls
-  - long rest and end chapter controls
+- Adventure Log
+- world map, adventure map, and encounter location view
+- party and opposition cards
+- GM prompting panel
+- combat turn gating
+- travel, search, flee, long rest, and end-chapter controls
+- backend-driven attack overlays and monster death animations
 
 ### Tab 3: Feedback
 
-The feedback tab is used to collect testing notes and preserve observations from playthroughs. It remains part of the longer-term loop for refining the system.
-
-## Frontend Notes
-
-The frontend has been actively refactored to reduce weight in `App.tsx` and make the interface easier to evolve.
-
-Important recent UI improvements include:
-- dedicated adventure subcomponents split out from `App.tsx`
-- improved loading state when entering the chapter
-- deferred work so Tab 2 appears faster
-- location image support for the encounter location cell
-- preview art support for mission popovers
-- player cards displayed as a visible stack in initiative order
-- opposition cards shown consistently in the location cell
-- automatic shift to Encounter Location after travel and when encounters begin
-- attack, hit, shake, and death overlay animations
-- death fade-out for defeated monsters
-
-The current animation strategy is intentionally more stateless than earlier attempts:
-- the real cards render from live backend state
-- animations use temporary overlay cards
-- after animation completes, the UI refreshes from backend truth
-
-## Combat and State Model
-
-Combat now revolves around event-driven state updates.
-
-Important event categories include:
-- transcript events
-- dice roll events
-- `attack_resolved`
-- HP change events
-- monster death events
-- opposition spawn and dismissal events
-- turn end events
-
-This event trail allows the frontend to:
-- animate attacks from backend-resolved outcomes
-- refresh against the latest session state after animation settles
-- keep the real UI anchored to persisted state instead of transient frontend guesses
-- avoid replaying old encounters after travel, spawn, or dismissal transitions
-
-## Local Assets
-
-MK4 now includes a larger image set than earlier versions.
-
-Current local assets include:
-- location artwork for encounter locations
-- six adventure preview images
-- player portraits
-- monster images
-- world and adventure maps
-- local music tracks
-
-Many of the location and preview images have been converted to lighter `.webp` assets to keep the UI responsive while still preserving decent display quality.
+The feedback tab remains part of the playtest loop for capturing observations while the system is evolving.
 
 ## Repository Layout
 
@@ -198,8 +138,9 @@ story-engine-MK5/
   frontend/
     src/
   shared/
+  tools/
   docker-compose.yml
-  MK4_BOOTSTRAP.md
+  MK5_SYSTEMS_PLAN.md
   README.md
 ```
 
@@ -217,6 +158,7 @@ story-engine-MK5/
 
 - Docker Desktop
 - Windows with Linux containers enabled
+- an OpenAI API key for live agent testing
 
 ### Environment
 
@@ -241,12 +183,12 @@ LLM_MODEL_NARRATIVE=gpt-4o
 
 A template is included in `.env.example`.
 
-### Start MK4 Locally
+### Start MK5 Locally
 
 From the project root:
 
 ```powershell
-cd "C:\Users\Raymond\Desktop\Test File\hello.js\story-engine-MK4"
+cd "C:\Users\Raymond\Desktop\Test File\hello.js\story-engine-MK5"
 docker compose up --build -d
 ```
 
@@ -257,49 +199,59 @@ docker compose up --build -d
 - Backend health check: `http://localhost:8002/health`
 - Postgres: `localhost:5434`
 
-## Development Notes
+### Useful Checks
 
-Some important practical notes for current MK4 work:
+Run backend tests locally:
 
-- local testing is done through Docker
-- only the active MK4 stack should be hosted locally during work
-- the frontend and backend are being tuned together based on repeated live playtests
-- combat, healing, target resolution, and UI sync are currently higher priority than adding larger feature scope such as RAG
+```powershell
+$env:PYTHONPATH='backend'
+python -m pytest backend/tests/test_mvp.py -q
+```
+
+Run the frontend build:
+
+```powershell
+cd frontend
+npm run build
+```
+
+Run focused backend tests inside Docker:
+
+```powershell
+docker exec -e PYTHONPATH=/app story-engine-mk5-backend-1 pytest tests/test_mvp.py -q
+```
 
 ## Current Testing Priorities
 
-Recent testing has focused heavily on:
-- single-monster and multi-monster combat
-- initiative and turn rotation
-- healing and knockout recovery
-- monster death and dismissal timing
-- animation timing and responsiveness
-- frontend/backend sync after attack sequences
-- invalid target handling in tool calls
+Current MK5 testing is focused on:
 
-Phase 7 validation now includes full quest-line playthrough checks for:
-- To Follow the King's Way
-- Nightmares of the Thawed
-- The Dead Remember
-- Collecting What's Owed
-- Memories of the Witch King
-- Blood at Midnight
+- full playthroughs of all six adventures
+- class feature reliability
+- backend tool-call guardrails
+- combat turn order and downed-agent recovery
+- objective completion from backend events
+- hazard/trap feedback clarity
+- local/live parity after GitHub pushes
+- reducing latency without removing necessary gameplay context
 
 ## Known Constraints
 
-MK4 is still an active development branch of the project.
+MK5 is still moving quickly.
 
 Known constraints include:
-- animation polish is still iterative
-- model behavior still needs guardrails for tool accuracy
-- the README reflects the current architecture, but the project is still evolving quickly
-- RAG, vector search, and larger rules-database support are not part of the current MK4 scope
+
+- model behavior still needs backend guardrails
+- UI feedback for hazards and puzzles can be clearer
+- response latency is mostly driven by LLM generation time
+- context size has grown because the game state is richer
+- some assets and old planning files remain from earlier MK versions
 
 ## License
 
 This project is distributed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License.
 
 See:
+
 - `story-engine-license.md`
 - https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
 

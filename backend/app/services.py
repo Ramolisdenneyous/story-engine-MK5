@@ -1386,11 +1386,27 @@ def _build_player_action_catalog(class_data: dict, inventory: list[str] | None =
     features = set(class_data.get("features", []))
     class_id = class_data.get("class_id")
     if class_id == "Fighter":
-        actions.append({"action_type": "ATTACK", "ability": "CLEAVE", "display_name": "Cleave", "attack_formula": "1d20+5", "damage_formula": "1d8+3", "damage_type": "slashing"})
+        actions.append({
+            "action_type": "ATTACK",
+            "ability": "CLEAVE",
+            "display_name": "Cleave",
+            "attack_formula": "1d20+5",
+            "damage_formula": "1d8+3",
+            "damage_type": "slashing",
+            "usage": "Send exactly one CLEAVE action. The backend expands it into up to two attacks against different living targets.",
+        })
     if class_id == "Barbarian":
         actions.append({"action_type": "SPELL", "ability": "RAGE", "display_name": "Rage"})
     if class_id == "Ranger":
-        actions.append({"action_type": "ATTACK", "ability": "DOUBLE_NOCK", "display_name": "Double Nock", "attack_formula": "1d20+5", "damage_formula": "1d8+3", "damage_type": "piercing"})
+        actions.append({
+            "action_type": "ATTACK",
+            "ability": "DOUBLE_NOCK",
+            "display_name": "Double Nock",
+            "attack_formula": "1d20+5",
+            "damage_formula": "1d8+3",
+            "damage_type": "piercing",
+            "usage": "Send exactly one DOUBLE_NOCK action. The backend expands it into two attacks against the same target.",
+        })
     if class_id == "Paladin":
         actions.append({"action_type": "ATTACK", "ability": "SMITE", "display_name": "Smite", "attack_formula": "1d20+5", "damage_formula": "1d8+3", "damage_type": "slashing"})
         actions.append({"action_type": "SPELL", "ability": "LAY_ON_HANDS", "display_name": "Lay on Hands"})
@@ -1706,6 +1722,9 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
         raw_actor_id = str(action.get("actor_id", "") or "")
         action_type = str(action.get("action_type", "") or "").upper()
         ability = _normalize_ability_name(str(action.get("ability", "") or ""))
+        if action_type in {"CLEAVE", "DOUBLE_NOCK"}:
+            ability = action_type
+            action_type = "ATTACK"
         if action_type == "SPELL" and ability in {"FIREBALL_SCROLL", "POTION_OF_HEALING", "POTION_OF_SPELL_RESTORE"}:
             action_type = "USE_ITEM"
         if ability in {"CLEAVE", "DOUBLE_NOCK"}:
@@ -1863,6 +1882,21 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
             if second_target:
                 expanded_feature_actions.append({**action, "target_id": second_target})
     normalized_actions = expanded_feature_actions
+
+    named_feature_attack_counts = payload.setdefault("_turn_named_feature_attack_counts", {})
+    capped_feature_actions: list[dict[str, Any]] = []
+    for action in normalized_actions:
+        ability = _normalize_ability_name(str(action.get("ability", "") or ""))
+        if ability not in {"CLEAVE", "DOUBLE_NOCK"}:
+            capped_feature_actions.append(action)
+            continue
+        feature_key = f"{action.get('actor_id', '')}:{ability}"
+        used_count = int(named_feature_attack_counts.get(feature_key, 0) or 0)
+        if used_count >= 2:
+            continue
+        named_feature_attack_counts[feature_key] = used_count + 1
+        capped_feature_actions.append(action)
+    normalized_actions = capped_feature_actions
 
     player_attack_actions = [action for action in normalized_actions if str(action.get("actor_id", "") or "").startswith("pc:") and str(action.get("action_type", "") or "").upper() == "ATTACK"]
     actions_by_actor: dict[str, list[dict[str, Any]]] = {}

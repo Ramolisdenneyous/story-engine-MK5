@@ -215,6 +215,7 @@ function buildOverlayScene(
   }
 
   const entry = attackGroup[0];
+  const eventIds = attackGroup.map((item) => item.eventId);
   const actorPlayer = playersById.get(entry.actor_id);
   const targetPlayer = playersById.get(entry.target_id);
   const actorMonster = monstersById.get(entry.actor_id);
@@ -222,7 +223,7 @@ function buildOverlayScene(
 
   return {
     mode: actorPlayer ? "single-player" : "single-monster",
-    eventIds: [entry.eventId],
+    eventIds,
     players: [
       ...(actorPlayer ? [{
         slot: actorPlayer.slot,

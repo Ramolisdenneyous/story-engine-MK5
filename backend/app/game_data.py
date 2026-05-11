@@ -104,7 +104,7 @@ CLASSES = {
         "armor_class": 18,
         "speed": 30,
         "class_prompt_guidance": [
-            "Use Cleave when two enemies are alive and the GM wants a multi-target strike: call resolve_action with up to two Longsword or CLEAVE attacks, each against a different target. Never target the same enemy twice with Cleave.",
+            "Use Cleave when two enemies are alive and the GM wants a multi-target strike. Preferred call: send exactly one resolve_action entry with ability CLEAVE targeting one living enemy; the backend will choose a second different living enemy and resolve both strikes. Alternative call: send exactly two LONGSWORD attacks against two different targets. Never send more than one CLEAVE entry in the same turn.",
         ],
         "features": ["Cleave", "Fighting Style - Protection", "Second Wind"],
         "weapons": ["Longsword", "Handaxe"],
@@ -170,7 +170,7 @@ CLASSES = {
         "armor_class": 15,
         "speed": 30,
         "class_prompt_guidance": [
-            "Use Double Nock when the GM wants focused ranged pressure: call resolve_action with up to two Longbow or DOUBLE_NOCK attacks against the same target. Both attacks roll separately.",
+            "Use Double Nock when the GM wants focused ranged pressure. Preferred call: send exactly one resolve_action entry with ability DOUBLE_NOCK targeting one living enemy; the backend will resolve two separate arrow attacks against that same target. Alternative call: send exactly two LONGBOW attacks against the same target. Never send more than one DOUBLE_NOCK entry in the same turn.",
         ],
         "features": ["Double Nock", "Favored Enemy", "Natural Explorer"],
         "weapons": ["Longbow", "Shortswords"],

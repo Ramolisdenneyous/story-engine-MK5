@@ -521,6 +521,49 @@ def test_named_cleave_and_double_nock_expand_to_feature_attacks(monkeypatch: pyt
     assert all(result["ability"] == "DOUBLE_NOCK" for result in ranger["results"])
 
 
+def test_misplaced_feature_action_type_is_canonicalized(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(services_module, "randbelow", lambda sides: sides - 1)
+
+    fighter = resolve_actions_for_payload(
+        phase5_payload("Fighter"),
+        {"actions": [{"actor_id": "pc:1", "target_id": "monster-a", "action_type": "CLEAVE", "ability": "LONGSWORD"}]},
+    )
+    assert fighter["retry_required"] is False
+    assert len(fighter["results"]) == 2
+    assert all(result["action_type"] == "ATTACK" for result in fighter["results"])
+    assert all(result["ability"] == "CLEAVE" for result in fighter["results"])
+    assert all(result["attack_total"] > 0 for result in fighter["results"])
+
+    ranger = resolve_actions_for_payload(
+        phase5_payload("Ranger"),
+        {"actions": [{"actor_id": "pc:1", "target_id": "monster-a", "action_type": "DOUBLE_NOCK", "ability": "LONGBOW"}]},
+    )
+    assert ranger["retry_required"] is False
+    assert len(ranger["results"]) == 2
+    assert all(result["action_type"] == "ATTACK" for result in ranger["results"])
+    assert all(result["ability"] == "DOUBLE_NOCK" for result in ranger["results"])
+    assert all(result["attack_total"] > 0 for result in ranger["results"])
+
+
+def test_named_feature_attacks_are_capped_across_tool_calls(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(services_module, "randbelow", lambda sides: sides - 1)
+    payload = phase5_payload("Ranger")
+
+    first = resolve_actions_for_payload(
+        payload,
+        {"actions": [{"actor_id": "pc:1", "target_id": "monster-a", "action_type": "ATTACK", "ability": "DOUBLE_NOCK"}]},
+    )
+    second = resolve_actions_for_payload(
+        payload,
+        {"actions": [{"actor_id": "pc:1", "target_id": "monster-b", "action_type": "ATTACK", "ability": "DOUBLE_NOCK"}]},
+    )
+
+    assert len(first["results"]) == 2
+    assert second["retry_required"] is False
+    assert second["results"] == []
+    assert second["state_changes"] == []
+
+
 def test_phase5_rogue_skill_expert_rolls_with_advantage(monkeypatch: pytest.MonkeyPatch):
     rolls = iter([2, 18])
     monkeypatch.setattr(services_module, "randbelow", lambda sides: next(rolls))

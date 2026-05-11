@@ -572,7 +572,7 @@ class OpenAIProvider(LLMProvider):
                 "type": "function",
                 "function": {
                     "name": "resolve_action",
-                    "description": "Request one or more gameplay actions. The backend will resolve all mechanics, update HP, and return the authoritative results.",
+                    "description": "Request one or more gameplay actions. The backend will resolve all mechanics, update HP, and return the authoritative results. For named multiattack features, send CLEAVE exactly once or DOUBLE_NOCK exactly once; the backend expands the named feature into its allowed attacks.",
                     "parameters": {
                         "type": "object",
                         "additionalProperties": False,

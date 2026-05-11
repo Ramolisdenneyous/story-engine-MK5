@@ -1708,6 +1708,8 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
         ability = _normalize_ability_name(str(action.get("ability", "") or ""))
         if action_type == "SPELL" and ability in {"FIREBALL_SCROLL", "POTION_OF_HEALING", "POTION_OF_SPELL_RESTORE"}:
             action_type = "USE_ITEM"
+        if ability in {"CLEAVE", "DOUBLE_NOCK"}:
+            action_type = "ATTACK"
         raw_target_id = str(action.get("target_id", "") or "")
         forced_actor_id = str(context["mechanical_hint"].get("actor_id", "") or "")
         if forced_actor_id:
@@ -1826,6 +1828,41 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                 "target_id": target_id,
             }
         )
+
+    expanded_feature_actions: list[dict[str, Any]] = []
+    feature_actions_by_actor: dict[tuple[str, str], int] = {}
+    for action in normalized_actions:
+        action_key = (
+            str(action.get("actor_id", "") or ""),
+            _normalize_ability_name(str(action.get("ability", "") or "")),
+        )
+        feature_actions_by_actor[action_key] = feature_actions_by_actor.get(action_key, 0) + 1
+
+    for action in normalized_actions:
+        expanded_feature_actions.append(action)
+        actor_id = str(action.get("actor_id", "") or "")
+        ability = _normalize_ability_name(str(action.get("ability", "") or ""))
+        if str(action.get("action_type", "") or "").upper() != "ATTACK":
+            continue
+        if feature_actions_by_actor.get((actor_id, ability), 0) != 1:
+            continue
+        actor = context["actor_map"].get(actor_id, {})
+        actor_class_id = str(actor.get("class_id", "") or "")
+        target_id = str(action.get("target_id", "") or "")
+        if ability == "DOUBLE_NOCK" and actor_class_id == "Ranger":
+            expanded_feature_actions.append({**action, "target_id": target_id})
+        elif ability == "CLEAVE" and actor_class_id == "Fighter":
+            second_target = next(
+                (
+                    str(monster.get("target_id", "") or "")
+                    for monster in context["visible_monsters"]
+                    if str(monster.get("target_id", "") or "") != target_id and _is_living_target(monster)
+                ),
+                "",
+            )
+            if second_target:
+                expanded_feature_actions.append({**action, "target_id": second_target})
+    normalized_actions = expanded_feature_actions
 
     player_attack_actions = [action for action in normalized_actions if str(action.get("actor_id", "") or "").startswith("pc:") and str(action.get("action_type", "") or "").upper() == "ATTACK"]
     actions_by_actor: dict[str, list[dict[str, Any]]] = {}

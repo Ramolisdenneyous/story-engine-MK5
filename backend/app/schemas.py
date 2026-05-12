@@ -235,7 +235,10 @@ class PromptResponse(BaseModel):
     user_event: EventOut
     agent_event: EventOut | None = None
     system_events: list[EventOut] = Field(default_factory=list)
+    extra_events: list[EventOut] = Field(default_factory=list)
     narration_pending: bool = False
+    followup_pending: bool = False
+    followup_expected_agent_events: int = 0
     summary_triggered: bool
 
 

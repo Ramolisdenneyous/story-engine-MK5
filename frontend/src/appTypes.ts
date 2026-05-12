@@ -96,6 +96,7 @@ export type MissionObjectiveState = {
   status: string;
   complete: boolean;
   return_available: boolean;
+  returned_to_moosehearth?: boolean;
   allowed_location_ids?: string[];
   visited_location_ids?: string[];
   undead_kills?: number;
@@ -181,7 +182,10 @@ export type PromptResponse = {
   user_event: TranscriptEvent;
   agent_event: TranscriptEvent | null;
   system_events: TranscriptEvent[];
+  extra_events?: TranscriptEvent[];
   narration_pending: boolean;
+  followup_pending?: boolean;
+  followup_expected_agent_events?: number;
   summary_triggered: boolean;
 };
 

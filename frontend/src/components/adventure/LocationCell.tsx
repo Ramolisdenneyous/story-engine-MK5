@@ -24,7 +24,7 @@ type LocationCellProps = {
   displayAdventureTitle: (adventure: SessionDetail["tab1"]["active_adventure"]) => string;
   encounterLocationTitle: string;
   playedAttackEventIds: string[];
-  latestEligibleReply: TranscriptEvent | null;
+  currentTtsReply: TranscriptEvent | null;
   ttsAutoPlay: boolean;
   ttsState: TtsState;
   onAnimationStateChange: (locked: boolean) => void;
@@ -80,14 +80,11 @@ type AttackOverlayScene = {
 
 type SpeakingHold = {
   slot: number;
-  promptIndex: number;
+  eventId: string;
   source: "narration";
 };
 
 const COMBAT_ANIMATION_MS = 5000;
-// Start timing when TTS playback begins. A small cushion makes the visual read
-// as a full 10 seconds after browser/audio startup jitter.
-const NARRATION_SPEAKING_HOLD_MS = 12000;
 
 function hpLossPercent(current: number, max: number) {
   if (max <= 0) return 100;
@@ -301,7 +298,7 @@ export function LocationCell({
   displayAdventureTitle,
   encounterLocationTitle,
   playedAttackEventIds,
-  latestEligibleReply,
+  currentTtsReply,
   ttsAutoPlay,
   ttsState,
   onAnimationStateChange,
@@ -313,7 +310,6 @@ export function LocationCell({
   const previousOppositionEntriesRef = useRef<DisplayOppositionEntry[]>([]);
   const fadeTimerRef = useRef<number | null>(null);
   const animationTimerRef = useRef<number | null>(null);
-  const speakingHoldTimerRef = useRef<number | null>(null);
   const lastNarrationHoldEventIdRef = useRef("");
   const activeSceneKeyRef = useRef("");
   const selectedLocation = adventureLocations.find((location) => location.id === activeLocation?.id) ?? null;
@@ -351,10 +347,6 @@ export function LocationCell({
 
   useEffect(() => {
     if (!ttsAutoPlay) {
-      if (speakingHoldTimerRef.current) {
-        window.clearTimeout(speakingHoldTimerRef.current);
-        speakingHoldTimerRef.current = null;
-      }
       setSpeakingHold(null);
     }
   }, [ttsAutoPlay]);
@@ -414,35 +406,29 @@ export function LocationCell({
   }, [activeOverlayScene, latestAttackSelection.staleEventIds, nextOverlayScene, onAnimationSettled, onAnimationStateChange, onMarkAttackAnimationPlayed]);
 
   useEffect(() => {
-    if (!ttsAutoPlay || ttsState !== "playing" || !latestEligibleReply?.event_id || latestEligibleReply.role !== "agent") {
+    if (!ttsAutoPlay || ttsState !== "playing" || !currentTtsReply?.event_id || currentTtsReply.role !== "agent") {
+      setSpeakingHold(null);
       return;
     }
-    if (!latestEligibleReply.agent_slot || latestEligibleReply.agent_slot === OPPOSITION_SLOT) {
+    if (!currentTtsReply.agent_slot || currentTtsReply.agent_slot === OPPOSITION_SLOT) {
+      setSpeakingHold(null);
       return;
     }
-    if (latestEligibleReply.prompt_index !== detail.session.prompt_index) {
+    if (currentTtsReply.prompt_index !== detail.session.prompt_index) {
+      setSpeakingHold(null);
       return;
     }
-    if (lastNarrationHoldEventIdRef.current === latestEligibleReply.event_id) {
+    if (lastNarrationHoldEventIdRef.current === currentTtsReply.event_id) {
       return;
     }
-    lastNarrationHoldEventIdRef.current = latestEligibleReply.event_id;
-    if (speakingHoldTimerRef.current) {
-      window.clearTimeout(speakingHoldTimerRef.current);
-    }
-    const holdSlot = latestEligibleReply.agent_slot;
+    lastNarrationHoldEventIdRef.current = currentTtsReply.event_id;
+    const holdSlot = currentTtsReply.agent_slot;
     setSpeakingHold({
       slot: holdSlot,
-      promptIndex: latestEligibleReply.prompt_index,
+      eventId: currentTtsReply.event_id,
       source: "narration",
     });
-    speakingHoldTimerRef.current = window.setTimeout(() => {
-      speakingHoldTimerRef.current = null;
-      setSpeakingHold((current) => (
-        current?.slot === holdSlot && current.source === "narration" ? null : current
-      ));
-    }, NARRATION_SPEAKING_HOLD_MS);
-  }, [detail.session.prompt_index, latestEligibleReply, ttsAutoPlay, ttsState]);
+  }, [currentTtsReply, detail.session.prompt_index, ttsAutoPlay, ttsState]);
 
   useEffect(() => () => {
     if (fadeTimerRef.current) {
@@ -450,9 +436,6 @@ export function LocationCell({
     }
     if (animationTimerRef.current) {
       window.clearTimeout(animationTimerRef.current);
-    }
-    if (speakingHoldTimerRef.current) {
-      window.clearTimeout(speakingHoldTimerRef.current);
     }
     activeSceneKeyRef.current = "";
     onAnimationStateChange(false);

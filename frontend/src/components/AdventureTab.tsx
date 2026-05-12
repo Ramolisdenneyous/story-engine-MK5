@@ -21,6 +21,7 @@ type AdventureTabProps = {
   transcriptChars: number;
   transcriptRef: RefObject<HTMLDivElement>;
   latestEligibleReply: TranscriptEvent | null;
+  currentTtsReply: TranscriptEvent | null;
   ttsState: TtsState;
   ttsAutoPlay: boolean;
   ttsStatusLabels: Record<TtsState, string>;
@@ -100,7 +101,7 @@ export function AdventureTab(props: AdventureTabProps) {
         displayAdventureTitle={props.displayAdventureTitle}
         encounterLocationTitle={props.encounterLocationTitle}
         playedAttackEventIds={props.playedAttackEventIds}
-        latestEligibleReply={props.latestEligibleReply}
+        currentTtsReply={props.currentTtsReply}
         ttsAutoPlay={props.ttsAutoPlay}
         ttsState={props.ttsState}
         onAnimationStateChange={props.onAnimationStateChange}

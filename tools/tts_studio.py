@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import argparse
 import threading
 import urllib.error
 import urllib.request
@@ -184,5 +185,69 @@ class TtsStudio:
         self.root.mainloop()
 
 
+def write_audio_file(
+    text: str,
+    output_path: Path,
+    voice: str = "alloy",
+    instructions: str = "Speak as a dark fantasy narrator. Calm, clear, ominous, and inviting.",
+) -> Path:
+    env = load_env(ENV_PATH)
+    api_key = env.get("OPENAI_API_KEY", "")
+    if not api_key:
+        raise RuntimeError(f"No OPENAI_API_KEY found in {ENV_PATH}")
+    base_url = env.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    model = env.get("LLM_MODEL_TTS", "gpt-4o-mini-tts")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "model": model,
+        "voice": voice,
+        "input": text,
+        "response_format": "mp3",
+    }
+    if instructions.strip():
+        payload["instructions"] = instructions.strip()
+    request = urllib.request.Request(
+        f"{base_url}/audio/speech",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            output_path.write_bytes(response.read())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenAI request failed: HTTP {exc.code}\n{detail}") from exc
+    return output_path
+
+
+def run_cli() -> bool:
+    parser = argparse.ArgumentParser(description="Generate an MP3 using the Story Engine TTS settings.")
+    parser.add_argument("--text", help="Text to synthesize.")
+    parser.add_argument("--text-file", type=Path, help="UTF-8 text file to synthesize.")
+    parser.add_argument("--voice", default="alloy", choices=VOICES)
+    parser.add_argument("--instructions", default="Speak as a dark fantasy narrator. Calm, clear, ominous, and inviting.")
+    parser.add_argument("--output", type=Path, help="Output MP3 path.")
+    args = parser.parse_args()
+    if not any([args.text, args.text_file, args.output]):
+        return False
+    if not args.output:
+        parser.error("--output is required in CLI mode")
+    if args.text_file:
+        text = args.text_file.read_text(encoding="utf-8").strip()
+    else:
+        text = (args.text or "").strip()
+    if not text:
+        parser.error("--text or --text-file must contain text")
+    output_path = args.output if args.output.is_absolute() else REPO_ROOT / args.output
+    saved = write_audio_file(text, output_path, voice=args.voice, instructions=args.instructions)
+    print(saved)
+    return True
+
+
 if __name__ == "__main__":
-    TtsStudio().run()
+    if not run_cli():
+        TtsStudio().run()

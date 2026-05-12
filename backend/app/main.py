@@ -58,6 +58,7 @@ from .services import (
     roll_dice_batch_for_session,
     roll_dice_for_session,
     roll_initiative,
+    run_party_prompt_followup,
     save_narrative_agent,
     save_tab1,
     search_current_location,
@@ -281,15 +282,23 @@ def lock_session_endpoint(session_id: str, db: Session = Depends(get_db)):
 @app.post("/session/{session_id}/prompt", response_model=PromptResponse)
 def prompt_endpoint(session_id: str, payload: PromptRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     try:
-        session, user_event, agent_event, summary_triggered, system_events, continuation_job = prompt_agent(db, session_id, payload.agent_slot, payload.user_text)
+        session, user_event, agent_event, summary_triggered, system_events, extra_events, continuation_job, party_followup_job = prompt_agent(db, session_id, payload.agent_slot, payload.user_text)
         if continuation_job:
             background_tasks.add_task(finalize_prompt_narration, **continuation_job)
+        if party_followup_job:
+            expected_agent_events = party_followup_job.pop("expected_agent_events", 0)
+            background_tasks.add_task(run_party_prompt_followup, **party_followup_job)
+        else:
+            expected_agent_events = 0
         return PromptResponse(
             session=_session_summary(session),
             user_event=user_event,
             agent_event=agent_event,
             system_events=system_events,
+            extra_events=extra_events,
             narration_pending=bool(continuation_job),
+            followup_pending=bool(party_followup_job),
+            followup_expected_agent_events=expected_agent_events,
             summary_triggered=summary_triggered,
         )
     except ValueError as e:

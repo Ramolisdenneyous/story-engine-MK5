@@ -1,0 +1,47 @@
+1. Treasure Hunting the Ruins of Icebane Castle / The Collapsed Barracks / trap
+File: docs\audio\noncombat-encounter-notices\icebane-castle-loc-3-rolling-stone-boulders.mp3
+Text: Trap: Rolling Stone Boulders. A low grinding sound rolls through the ruin before the stones move. The passage becomes a sudden avalanche of old masonry, forcing quick awareness and raw strength to survive the boulders.
+
+2. Midnight Raid of the East Marsh Orcs / The Blackwater Approach / hazard
+File: docs\audio\noncombat-encounter-notices\east-marsh-raid-loc-1-blackwater-approach.mp3
+Text: Hazard: Blackwater Approach. The approach is watched by hostile eyes and nervous hands. Reeds, fog, and broken ground offer cover, but one careless step could carry across the marsh. The party must move silently; anyone who fails the forced Stealth check risks alerting guards.
+
+3. Midnight Raid of the East Marsh Orcs / The Watcher's Rise / hazard
+File: docs\audio\noncombat-encounter-notices\east-marsh-raid-loc-2-watcher-s-rise.mp3
+Text: Hazard: Watcher's Rise. The approach is watched by hostile eyes and nervous hands. Reeds, fog, and broken ground offer cover, but one careless step could carry across the marsh. The party must move silently; anyone who fails the forced Stealth check risks alerting guards.
+
+4. Midnight Raid of the East Marsh Orcs / The Outer Camp Ring / hazard
+File: docs\audio\noncombat-encounter-notices\east-marsh-raid-loc-3-outer-camp-ring.mp3
+Text: Hazard: Outer Camp Ring. The outer camp can be pulled out of rhythm, but only with careful timing. A thrown sound, a false trail, a convincing signal, or another justified tactic could open the route. The party needs three successful distractions; a botched attempt draws hostile attention.
+
+5. Midnight Raid of the East Marsh Orcs / The Supply Cache Pit / hazard
+File: docs\audio\noncombat-encounter-notices\east-marsh-raid-loc-4-supply-cache-pit.mp3
+Text: Hazard: Supply Cache Pit. The approach is watched by hostile eyes and nervous hands. Reeds, fog, and broken ground offer cover, but one careless step could carry across the marsh. The party must move silently; anyone who fails the forced Stealth check risks alerting guards.
+
+6. Midnight Raid of the East Marsh Orcs / The Fog-Choked Escape Channel / hazard
+File: docs\audio\noncombat-encounter-notices\east-marsh-raid-loc-6-fog-choked-escape-channel.mp3
+Text: Hazard: Fog-Choked Escape Channel. Fog rolls low over a black escape channel. The water is freezing, the current drags sideways, and the far bank is more sensed than seen. Each adventurer must fight through the crossing with repeated Athletics checks; failure means the water takes its price.
+
+7. Escort of the Telos Supply Wagons along the King's Way / The Western Tundra Stretch / hazard
+File: docs\audio\noncombat-encounter-notices\telas-wagons-loc-1-mud-stuck-wagon.mp3
+Text: Hazard: Mud-Stuck Wagon. The wagon has sunk deep into sucking road-mud, wheels buried almost to the hubs. The team strains uselessly unless the party can coordinate leverage, clearing, pushing, or another sound approach. Three successful efforts will free it; poor attempts risk injury and wasted time.
+
+8. Escort of the Telos Supply Wagons along the King's Way / The Glockstead Approach / story
+File: docs\audio\noncombat-encounter-notices\telas-wagons-loc-6-glockstead-approach.mp3
+Text: Glockstead Approach. The wagons reach Glockstead. The mission objective is complete.
+
+9. Tombrobbing the Old-People's Barrow / The Frost-Cleft Entrance / trap
+File: docs\audio\noncombat-encounter-notices\old-people-barrow-loc-1-rolling-stone-boulders.mp3
+Text: Trap: Rolling Stone Boulders. A low grinding sound rolls through the ruin before the stones move. The passage becomes a sudden avalanche of old masonry, forcing quick awareness and raw strength to survive the boulders.
+
+10. Tombrobbing the Old-People's Barrow / The Sealed Door / hazard
+File: docs\audio\noncombat-encounter-notices\old-people-barrow-loc-4-puzzle-door.mp3
+Text: Hazard: Puzzle Door. A sealed stone door bars the way, its surface carved with old marks half-hidden beneath frost and soot. The mechanism is listening for the right history, not brute force. The party needs three good insights to open it; wrong answers rattle the ruin and punish carelessness.
+
+11. Tombrobbing the Old-People's Barrow / The Fractured Escape Tunnel / hazard
+File: docs\audio\noncombat-encounter-notices\old-people-barrow-loc-6-steep-cliffside.mp3
+Text: Hazard: Steep Cliffside. The path pinches against a wind-scoured cliffside. Ice-slick stone offers only narrow handholds, and every upward pull sends loose shale ticking into the drop below. Each adventurer must make steady Athletics progress to climb clear; failed efforts mean slips, bruising impacts, and lost ground.
+
+12. Putting to Rest the Undead Along the Endless Glacier / Everflame Abbey / story
+File: docs\audio\noncombat-encounter-notices\endless-glacier-undead-loc-1-everflame-abbey.mp3
+Text: Everflame Abbey. Father Balgart receives the party with urgency and offers shelter before they cross the glacier.

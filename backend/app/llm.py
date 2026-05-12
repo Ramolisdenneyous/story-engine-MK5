@@ -31,6 +31,7 @@ DECLARED_BUT_UNROLLED_ACTION_RE = re.compile(
     r"\bi\s+(?:roll|am\s+rolling)\s+to\s+(?:attack|hit|damage|heal)\b|"
     r"\bi(?:'ll| will)\s+roll\s+(?:for\s+)?(?:a\s+|an\s+)?(?:[a-z]+(?:\s+[a-z]+){0,2}\s+check|attack|damage|healing?|initiative|save)\b|"
     r"\bi(?:'ll| will)\s+(?:make|take|attempt|use|cast)?\s*(?:my\s+)?(?:attack|swing|shot|heal|spell|skill check)\b|"
+    r"\bi(?:['’]ll| will)\s+cast\s+[a-z][a-z\s'-]{1,40}\b|"
     r"\bi attack\b|"
     r"\bi(?:'m| am)\s+going to attack\b|"
     r"\bi\s+(?:swing|strike|slash|shoot|fire|cast)\b|"
@@ -61,6 +62,10 @@ PROCESS_LEAK_RE = re.compile(
     r"(now,\s+i\s+will\s+update|i\s+will\s+update\s+\w+['’]s?\s+combat\s+state|update\s+\w+['’]s?\s+combat\s+state)",
     re.IGNORECASE,
 )
+FAKE_TOOL_PROCESS_RE = re.compile(
+    r"(now,\s+i(?:['’]ll| will)\s+resolve|calling\s+for\s+[a-z][a-z\s'-]{1,40})",
+    re.IGNORECASE,
+)
 ATTACK_RESOLUTION_MARKER_PREFIX = "ATTACK_RESOLUTION:"
 
 
@@ -70,6 +75,7 @@ class GenerationResult:
     pending_state_changes: list[dict[str, Any]]
     pending_roll_results: list[dict[str, Any]]
     pending_action_results: list[dict[str, Any]]
+    party_requests: list[dict[str, Any]] | None = None
     continuation: dict[str, Any] | None = None
 
     @property
@@ -131,6 +137,7 @@ class LLMProvider:
             pending_state_changes=[],
             pending_roll_results=[],
             pending_action_results=[],
+            party_requests=[],
         )
 
     def continue_generation(self, continuation: dict[str, Any]) -> str:
@@ -175,6 +182,7 @@ class MockLLMProvider(LLMProvider):
             pending_state_changes=[],
             pending_roll_results=[],
             pending_action_results=[],
+            party_requests=[],
         )
 
     def generate_image(self, prompt_text: str, reference_image_bytes: bytes | None = None) -> str:
@@ -200,13 +208,13 @@ class OpenAIProvider(LLMProvider):
     def generate(self, agent_id: str, model: str, payload: dict) -> str:
         system_prompt = self._system_prompt(agent_id, payload)
         messages = self._messages(agent_id, payload)
-        tools = self._tools(agent_id)
+        tools = self._tools(agent_id, payload)
         return self._chat(model, messages, system_prompt, tools, payload).content
 
     def generate_action_response(self, agent_id: str, model: str, payload: dict) -> GenerationResult:
         system_prompt = self._system_prompt(agent_id, payload)
         messages = self._messages(agent_id, payload)
-        tools = self._tools(agent_id)
+        tools = self._tools(agent_id, payload)
         return self._chat(model, messages, system_prompt, tools, payload)
 
     def generate_image(self, prompt_text: str, reference_image_bytes: bytes | None = None) -> str:
@@ -287,6 +295,7 @@ class OpenAIProvider(LLMProvider):
         pending_state_changes: list[dict[str, Any]] = []
         pending_roll_results: list[dict[str, Any]] = []
         pending_action_results: list[dict[str, Any]] = []
+        party_requests: list[dict[str, Any]] = []
         used_action_tool = False
         used_inventory_tool = False
         with httpx.Client(timeout=90.0) as client:
@@ -318,11 +327,13 @@ class OpenAIProvider(LLMProvider):
                 if tool_calls:
                     chat_messages.append(message)
                     retry_required = False
+                    gameplay_tool_called = False
                     for call in tool_calls:
                         args = json.loads(call["function"]["arguments"])
                         if call["function"]["name"] == "resolve_action":
                             result = resolve_action_tool(payload_context, args)
                             used_action_tool = True
+                            gameplay_tool_called = True
                             if result.get("retry_required"):
                                 retry_required = True
                             else:
@@ -333,6 +344,11 @@ class OpenAIProvider(LLMProvider):
                             result = update_inventory_tool(args)
                             pending_state_changes.append(result)
                             used_inventory_tool = True
+                            gameplay_tool_called = True
+                        elif call["function"]["name"] == "request_party_response":
+                            result = request_party_response_tool(payload_context, args)
+                            if result.get("accepted"):
+                                party_requests.append(result)
                         else:
                             continue
                         chat_messages.append(
@@ -356,11 +372,27 @@ class OpenAIProvider(LLMProvider):
                         )
                         force_finalize = False
                         continue
+                    if party_requests and not gameplay_tool_called:
+                        chat_messages.append(
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Your request for another party member to respond has been recorded. "
+                                    "Now finish your own visible reply to the GM in character. Do not call another tool."
+                                ),
+                            }
+                        )
+                        force_finalize = True
+                        continue
                     continuation_messages = [
                         *chat_messages,
                         {
                             "role": "system",
-                            "content": "Use the tool result you just received and answer the GM now. Call additional tools only if another separate roll or state update is still required.",
+                            "content": (
+                                "Use the tool result you just received and answer the GM now. Call additional tools only if another separate roll or state update is still required. "
+                                "For SEARCH, PERCEPTION, or INVESTIGATION results, treat any found_loot field as authoritative: name those exact items and do not invent an ornate box, chest, relic, clue, or extra treasure. "
+                                "If the result says no loot or failure, do not describe finding treasure."
+                            ),
                         },
                     ]
                     return GenerationResult(
@@ -368,6 +400,7 @@ class OpenAIProvider(LLMProvider):
                         pending_state_changes=pending_state_changes,
                         pending_roll_results=pending_roll_results,
                         pending_action_results=pending_action_results,
+                        party_requests=party_requests,
                         continuation={"model": model, "messages": continuation_messages},
                     )
                 content = (message.get("content") or "").strip()
@@ -376,6 +409,7 @@ class OpenAIProvider(LLMProvider):
                     pending_state_changes = []
                     pending_roll_results = []
                     pending_action_results = []
+                    party_requests = []
                     used_action_tool = False
                     used_inventory_tool = False
                     chat_messages.append(message)
@@ -393,13 +427,14 @@ class OpenAIProvider(LLMProvider):
                     continue
                 missing_action_tool = (DECLARED_BUT_UNROLLED_ACTION_RE.search(content) or ATTACK_RESOLUTION_RE.search(content)) and not used_action_tool
                 missing_state_tool = STATE_RESOLUTION_RE.search(content) and not _has_effective_state_change(pending_state_changes)
-                process_leak = PROCESS_LEAK_RE.search(content)
+                process_leak = PROCESS_LEAK_RE.search(content) or FAKE_TOOL_PROCESS_RE.search(content)
                 impossible_miss_state = MISS_RESOLUTION_RE.search(content) and _has_effective_state_change(pending_state_changes)
                 if tools and (missing_action_tool or missing_state_tool or process_leak or impossible_miss_state):
                     logger.warning("Model described combat or healing resolution without using required tools; retrying with correction.")
                     pending_state_changes = []
                     pending_roll_results = []
                     pending_action_results = []
+                    party_requests = []
                     used_action_tool = False
                     used_inventory_tool = False
                     chat_messages.append(message)
@@ -425,12 +460,14 @@ class OpenAIProvider(LLMProvider):
                     pending_state_changes=pending_state_changes,
                     pending_roll_results=pending_roll_results,
                     pending_action_results=pending_action_results,
+                    party_requests=party_requests,
                 )
         return GenerationResult(
             content="I report the roll result and wait for the GM to resolve the outcome.",
             pending_state_changes=pending_state_changes,
             pending_roll_results=pending_roll_results,
             pending_action_results=pending_action_results,
+            party_requests=party_requests,
         )
 
     def continue_generation(self, continuation: dict[str, Any]) -> str:
@@ -496,6 +533,9 @@ class OpenAIProvider(LLMProvider):
         mission_objective = payload.get("mission_objective", {})
         current_encounter = payload.get("current_encounter", {})
         current_location = payload.get("current_location", "")
+        party_roster = payload.get("party_roster", [])
+        party_prompt_mode = payload.get("party_prompt_mode", "")
+        starter_party_prompt_required = bool(payload.get("starter_party_prompt_required"))
         user_prompt = payload["user_prompt"]
         lines = []
         for event in recent:
@@ -522,14 +562,23 @@ class OpenAIProvider(LLMProvider):
             f"{json.dumps(current_encounter, ensure_ascii=True)}\n\n"
             "[Opposition State]\n"
             f"{json.dumps(opposition_state, ensure_ascii=True)}\n\n"
+            "[Party Roster]\n"
+            f"{json.dumps(party_roster, ensure_ascii=True)}\n\n"
+            "[Party Prompt Mode]\n"
+            f"{party_prompt_mode or 'direct GM prompt'}\n\n"
+            "[Party Prompt Guidance]\n"
+            f"{json.dumps({'allowed': bool(payload.get('allow_party_prompt')), 'starter_party_prompt_required': starter_party_prompt_required, 'instruction': 'For the exact starter prompt, answer with your plan and call request_party_response to ask exactly one other player agent a question.' if starter_party_prompt_required else ''}, ensure_ascii=True)}\n\n"
             "[Recent Context]\n"
             f"{chr(10).join(lines)}\n\n"
             "[User Prompt]\n"
             f"{user_prompt}"
         )
 
-    def _tools(self, agent_id: str) -> list[dict[str, Any]] | None:
+    def _tools(self, agent_id: str, payload: dict[str, Any] | None = None) -> list[dict[str, Any]] | None:
         if agent_id not in {"agent_character", "agent12"}:
+            return None
+        payload = payload or {}
+        if payload.get("party_prompt_mode"):
             return None
         supported_abilities = [
             "RAPIER",
@@ -567,7 +616,7 @@ class OpenAIProvider(LLMProvider):
             re.sub(r"[^A-Z0-9]+", "_", name.strip().upper()).strip("_")
             for name in MONSTER_CATALOG.keys()
         )
-        return [
+        tools = [
             {
                 "type": "function",
                 "function": {
@@ -640,12 +689,69 @@ class OpenAIProvider(LLMProvider):
                 },
             },
         ]
+        if (
+            agent_id == "agent_character"
+            and payload.get("allow_party_prompt")
+            and not payload.get("party_prompt_mode")
+        ):
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "request_party_response",
+                        "description": (
+                            "Outside combat only: ask or address one other player agent. "
+                            "Use this only when a brief character-to-character reply would help the scene. "
+                            "The backend will route a bounded response chain; do not use it during combat."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "target_slot": {"type": "integer", "enum": [1, 2, 3, 4]},
+                                "message": {"type": "string"},
+                                "mode": {"type": "string", "enum": ["statement", "question"]},
+                            },
+                            "required": ["target_slot", "message", "mode"],
+                        },
+                    },
+                }
+            )
+        return tools
 
 
 def resolve_action_tool(payload_context: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
     from .services import resolve_actions_for_payload
 
     return resolve_actions_for_payload(payload_context, args)
+
+
+def request_party_response_tool(payload_context: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+    source_slot = int(payload_context.get("agent_identity", {}).get("slot", 0) or 0)
+    target_slot = int(args.get("target_slot", 0) or 0)
+    mode = str(args.get("mode", "") or "").lower()
+    message = str(args.get("message", "") or "").strip()
+    party = payload_context.get("party_roster", []) or []
+    valid_slots = {int(member.get("slot", 0) or 0) for member in party}
+    in_combat = bool(payload_context.get("mechanical_resolution_hint", {}).get("in_combat"))
+    if in_combat:
+        return {"accepted": False, "reason": "Party response requests are not allowed during combat."}
+    if mode not in {"statement", "question"}:
+        return {"accepted": False, "reason": "mode must be statement or question."}
+    if not message:
+        return {"accepted": False, "reason": "message is required."}
+    if target_slot not in valid_slots or target_slot == source_slot:
+        return {"accepted": False, "reason": "target_slot must be another selected player agent."}
+    name_by_slot = {int(member.get("slot", 0) or 0): str(member.get("name", "") or "") for member in party}
+    return {
+        "accepted": True,
+        "source_slot": source_slot,
+        "source_name": name_by_slot.get(source_slot, f"Agent {source_slot}"),
+        "target_slot": target_slot,
+        "target_name": name_by_slot.get(target_slot, f"Agent {target_slot}"),
+        "mode": mode,
+        "message": message[:1000],
+    }
 
 
 def update_inventory_tool(args: dict[str, Any]) -> dict[str, Any]:

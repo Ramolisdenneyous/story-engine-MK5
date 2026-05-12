@@ -809,7 +809,7 @@ ENCOUNTER_DEFINITIONS = {
         "loc-6": {"type": "hazard", "name": "Steep Cliffside", "hazard": "steep_cliffside"},
     },
     "endless-glacier-undead": {
-        "loc-1": {"type": "story", "name": "Everflame Abbey", "text": "Father Balgart receives the party with urgency and offers shelter before they cross the glacier."},
+        "loc-1": {"type": "hazard", "name": "Everflame Abbey Negotiation", "hazard": "abbey_negotiation", "blocks_travel_to": ["loc-2", "loc-3", "loc-4", "loc-5", "loc-6"]},
         "loc-2": {"type": "combat", "name": "Frozen Pilgrim's Path", "monsters": ["Skeleton", "Skeleton", "Warhorse Skeleton"], "repeatable": True, "dropped_loot": ["Old Saddle"], "searched_loot": ["Potion of Spell Restore"]},
         "loc-3": {"type": "combat", "name": "Shattered Ice Field", "monsters": ["Minotaur Skeleton"], "repeatable": True, "searched_loot": ["Potion of Healing"]},
         "loc-4": {"type": "combat", "name": "Burial Drift", "monsters": ["Zombie", "Zombie", "Zombie", "Zombie"], "repeatable": True, "dropped_loot": ["Potion of Healing"], "searched_loot": ["Potion of Spell Restore"]},
@@ -838,6 +838,7 @@ HAZARD_DEFINITIONS = {
     "staged_distraction": {"name": "Staged Distraction", "skill": "Any justified skill", "dc": 13, "required_successes": 3, "mode": "global"},
     "swimming": {"name": "Swimming", "skill": "Athletics", "dc": 13, "required_successes": 3, "mode": "per_player"},
     "mud_stuck_wagon": {"name": "Mud-Stuck Wagon", "skill": "Any justified skill", "dc": 13, "required_successes": 3, "mode": "global"},
+    "abbey_negotiation": {"name": "Everflame Abbey Negotiation", "skill": "Any justified social or roleplay skill", "dc": 13, "required_successes": 3, "max_attempts": 3, "mode": "negotiation"},
 }
 
 for monster_id, monster in MONSTERS.items():

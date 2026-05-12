@@ -8,7 +8,8 @@ os.environ["DATABASE_URL"] = "sqlite+pysqlite:///./test_story_engine.db"
 from app import main as main_module  # noqa: E402
 from app import services as services_module  # noqa: E402
 from app.db import Base, SessionLocal, engine  # noqa: E402
-from app.models import Event, EventKind, EventRole  # noqa: E402
+from app.llm import DECLARED_BUT_UNROLLED_ACTION_RE, FAKE_TOOL_PROCESS_RE  # noqa: E402
+from app.models import Event, EventKind, EventRole, LLMArtifact  # noqa: E402
 from app.services import _advance_combat_turn, _append_state_change, _apply_hazard_skill_result, dismiss_opposition, get_session_or_404, resolve_actions_for_payload, use_item  # noqa: E402
 
 
@@ -78,6 +79,12 @@ def telas_wagons_payload():
     return payload
 
 
+def endless_glacier_payload():
+    payload = jannet_wizard_payload()
+    payload["adventure_id"] = "endless-glacier-undead"
+    return payload
+
+
 def create_and_lock_session(client: TestClient) -> str:
     created = client.post("/session").json()
     session_id = created["session_id"]
@@ -101,6 +108,142 @@ def test_prompt_index_increments_only_on_user_prompt(client: TestClient):
     assert len(transcript_events) == 7
     assert [event["prompt_index"] for event in transcript_events if event["role"] == "user"] == [1, 2, 3]
     assert [event["prompt_index"] for event in transcript_events if event["role"] == "agent"] == [1, 2, 3]
+
+
+class PartyPromptProvider:
+    provider_name = "test"
+
+    def generate_action_response(self, agent_id: str, model: str, payload: dict):
+        mode = payload.get("party_prompt_mode", "")
+        if mode == "response":
+            return services_module.GenerationResult(
+                content="I answer the question once.",
+                pending_state_changes=[],
+                pending_roll_results=[],
+                pending_action_results=[],
+                party_requests=[],
+            )
+        if mode == "acknowledgement":
+            return services_module.GenerationResult(
+                content="I acknowledge the answer and let the matter rest.",
+                pending_state_changes=[],
+                pending_roll_results=[],
+                pending_action_results=[],
+                party_requests=[],
+            )
+        return services_module.GenerationResult(
+            content="I turn to Annie with a careful question.",
+            pending_state_changes=[],
+            pending_roll_results=[],
+            pending_action_results=[],
+            party_requests=[{"accepted": True, "source_slot": 1, "target_slot": 2, "mode": "question", "message": "What do you make of this place?"}],
+        )
+
+    def generate(self, agent_id: str, model: str, payload: dict) -> str:
+        return "summary"
+
+
+class StarterFallbackPartyPromptProvider(PartyPromptProvider):
+    def generate_action_response(self, agent_id: str, model: str, payload: dict):
+        mode = payload.get("party_prompt_mode", "")
+        if mode:
+            return super().generate_action_response(agent_id, model, payload)
+        return services_module.GenerationResult(
+            content="I lay out the first move, but forget to use the party prompt tool.",
+            pending_state_changes=[],
+            pending_roll_results=[],
+            pending_action_results=[],
+            party_requests=[],
+        )
+
+
+def test_party_prompt_question_routes_bounded_reply_and_acknowledgement(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(services_module, "get_provider", lambda: PartyPromptProvider())
+    session_id = create_and_lock_session(client)
+
+    response = client.post(f"/session/{session_id}/prompt", json={"agent_slot": 1, "user_text": "Ask Annie what she thinks."})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session"]["prompt_index"] == 1
+    assert body["extra_events"] == []
+    assert body["followup_pending"] is True
+    assert body["followup_expected_agent_events"] == 2
+
+    detail = client.get(f"/session/{session_id}").json()
+    agent_events = [event for event in detail["events"] if event["role"] == "agent"]
+    assert [event["agent_slot"] for event in agent_events] == [1, 2, 1]
+    assert detail["session"]["prompt_index"] == 1
+
+
+def test_starter_prompt_fallback_routes_question_to_annie(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(services_module, "get_provider", lambda: StarterFallbackPartyPromptProvider())
+    session_id = create_and_lock_session(client)
+
+    response = client.post(
+        f"/session/{session_id}/prompt",
+        json={"agent_slot": 1, "user_text": "Party leader, you know this mission, what is your plan?"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["extra_events"] == []
+    assert body["followup_pending"] is True
+    assert body["followup_expected_agent_events"] == 2
+
+    detail = client.get(f"/session/{session_id}").json()
+    agent_events = [event for event in detail["events"] if event["role"] == "agent"]
+    assert [event["agent_slot"] for event in agent_events] == [1, 2, 1]
+    system_prompts = [
+        event
+        for event in detail["events"]
+        if event["role"] == "system" and event["json_payload"].get("source") == "party_prompt"
+    ]
+    assert system_prompts
+    assert system_prompts[0]["json_payload"]["source"] == "party_prompt"
+    assert system_prompts[0]["json_payload"]["target_slot"] == 2
+    db = SessionLocal()
+    try:
+        artifact_agent_ids = [artifact.agent_id for artifact in db.query(LLMArtifact).all()]
+    finally:
+        db.close()
+    assert "agent_party_response" in artifact_agent_ids
+    assert "agent_party_ack" in artifact_agent_ids
+    assert all(len(agent_id) <= 32 for agent_id in artifact_agent_ids)
+
+
+def test_party_prompt_chain_does_not_run_in_combat(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(services_module, "get_provider", lambda: PartyPromptProvider())
+    session_id = create_and_lock_session(client)
+    db = SessionLocal()
+    try:
+        session = get_session_or_404(db, session_id)
+        session.combat_state = {
+            "in_combat": True,
+            "round": 1,
+            "turn_index": 0,
+            "initiative_order": ["pc:1"],
+            "initiative_values": {"pc:1": 10},
+            "acted_this_round": {},
+        }
+        session.opposition_state = {
+            "active": True,
+            "group_id": "test",
+            "initiative_id": "opp:12",
+            "monster_type": "Zombie",
+            "monster_stats": {"ac": 8},
+            "instances": [{"monster_id": "monster-a", "display_name": "Monster-One", "current_hp": 10, "hp_max": 10, "is_dead": False, "monster_type": "Zombie", "monster_stats": {"ac": 8}, "status_effects": []}],
+        }
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(f"/session/{session_id}/prompt", json={"agent_slot": 1, "user_text": "Ask Annie while fighting."})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["extra_events"] == []
+    assert body["followup_pending"] is False
+    detail = client.get(f"/session/{session_id}").json()
+    assert [event["agent_slot"] for event in detail["events"] if event["role"] == "agent"] == [1]
 
 
 def test_summarization_triggers_at_multiples_of_7(client: TestClient):
@@ -296,6 +439,46 @@ def test_fireball_scroll_resolves_even_if_model_labels_it_as_spell():
     assert damaged_targets == {"monster-a", "monster-b"}
     inventory_removes = [target for target in changes if target["target_type"] == "player"]
     assert len(inventory_removes) == 2
+
+
+def test_fake_bless_tool_narration_is_flagged_for_retry():
+    content = "I’ll cast Bless on all of us. Now, I’ll resolve that action. *Calling for Bless!*"
+
+    assert DECLARED_BUT_UNROLLED_ACTION_RE.search(content)
+    assert FAKE_TOOL_PROCESS_RE.search(content)
+
+
+def test_search_tool_result_names_authoritative_loot(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(services_module, "randbelow", lambda sides: sides - 1)
+    payload = {
+        "agent_identity": {"slot": 2, "name": "Annie"},
+        "class_sheet": {"class_id": "Rogue", "inventory": []},
+        "current_encounter": {
+            "search": {
+                "available": True,
+                "found": False,
+                "loot": ["Potion of Healing"],
+            }
+        },
+        "mechanical_resolution_hint": {
+            "actor_id": "pc:2",
+            "party_targets": [
+                {"target_id": "pc:2", "target_type": "player", "slot": 2, "name": "Annie", "armor_class": 15, "current_hp": 9, "hp_max": 9}
+            ],
+            "available_actions": [{"action_type": "SKILL", "ability": "SEARCH", "display_name": "Search"}],
+        },
+    }
+
+    result = resolve_actions_for_payload(
+        payload,
+        {"actions": [{"actor_id": "pc:2", "target_id": "pc:2", "action_type": "SKILL", "ability": "SEARCH"}]},
+    )
+
+    assert result["errors"] == []
+    assert result["results"][0]["success"] is True
+    assert result["results"][0]["found_loot"] == ["Potion of Healing"]
+    assert "Potion of Healing" in result["results"][0]["reason"]
+    assert "Do not invent" in result["results"][0]["narration_instruction"]
 
 
 def test_magic_missile_spends_mp_and_fails_at_zero_mp():
@@ -1156,6 +1339,87 @@ def test_old_people_barrow_puzzle_door_blocks_burial_vault_until_cleared(client:
 
     assert blocked.status_code == 400
     assert "Clear Puzzle Door" in blocked.json()["detail"]
+
+
+def test_everflame_abbey_negotiation_sets_bounty_and_upfront_potion(client: TestClient):
+    created = client.post("/session").json()
+    session_id = created["session_id"]
+    assert client.put(f"/session/{session_id}/tab1", json=endless_glacier_payload()).status_code == 200
+    assert client.post(f"/session/{session_id}/lock").status_code == 200
+
+    with SessionLocal() as db:
+        session = get_session_or_404(db, session_id)
+        session.current_location_id = "loc-1"
+        session.current_location_name = "Everflame Abbey"
+        session.encounter_state = {
+            "active": True,
+            "status": "blocking",
+            "location_id": "loc-1",
+            "encounter_type": "hazard",
+            "encounter_name": "Everflame Abbey Negotiation",
+            "definition": {"type": "hazard", "name": "Everflame Abbey Negotiation", "hazard": "abbey_negotiation"},
+            "hazard": {
+                "hazard_id": "abbey_negotiation",
+                "name": "Everflame Abbey Negotiation",
+                "mode": "negotiation",
+                "required_successes": 3,
+                "max_attempts": 3,
+                "global_successes": 0,
+                "global_failures": 0,
+                "status": "blocking",
+            },
+        }
+        for prompt_index in range(1, 4):
+            _apply_hazard_skill_result(db, session, 1, prompt_index, {"action_type": "SKILL", "success": True, "attack_total": 18})
+        db.commit()
+
+    detail = client.get(f"/session/{session_id}").json()
+    assert detail["session"]["encounter_state"]["status"] == "clear"
+    objective = detail["session"]["mission_objective_state"]
+    assert objective["abbey_negotiation_complete"] is True
+    assert objective["abbey_negotiation_successes"] == 3
+    assert objective["undead_reward_per_kill"] == 10
+    assert any(
+        event["kind"] == "inventory_gained"
+        and event["json_payload"].get("item") == "Potion of Healing"
+        and event["json_payload"].get("source") == "abbey_negotiation"
+        for event in detail["events"]
+    )
+
+
+def test_endless_glacier_bounty_pays_on_tenth_undead(client: TestClient):
+    created = client.post("/session").json()
+    session_id = created["session_id"]
+    assert client.put(f"/session/{session_id}/tab1", json=endless_glacier_payload()).status_code == 200
+    assert client.post(f"/session/{session_id}/lock").status_code == 200
+
+    with SessionLocal() as db:
+        session = get_session_or_404(db, session_id)
+        state = dict(session.mission_objective_state or {})
+        state.update({"abbey_negotiation_complete": True, "abbey_negotiation_successes": 2, "undead_reward_per_kill": 10})
+        session.mission_objective_state = state
+        for prompt_index in range(1, 11):
+            services_module._apply_monster_death_objective_updates(
+                db,
+                session,
+                prompt_index,
+                {"instances": [{"monster_type": "Zombie"}]},
+                {"monster_type": "Zombie"},
+                [],
+                actor_id="pc:1",
+            )
+        db.commit()
+
+    detail = client.get(f"/session/{session_id}").json()
+    objective = detail["session"]["mission_objective_state"]
+    assert objective["complete"] is True
+    assert objective["undead_reward_earned"] == 100
+    assert any(
+        event["kind"] == "inventory_gained"
+        and event["json_payload"].get("item") == "100gp"
+        and event["json_payload"].get("source") == "mission_objective"
+        for event in detail["events"]
+    )
 
 
 def test_collecting_taxes_awards_one_quest_gold_drop_per_combat(client: TestClient):

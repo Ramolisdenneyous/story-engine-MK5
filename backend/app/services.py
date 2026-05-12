@@ -81,6 +81,11 @@ HAZARD_PRESENTATION = {
         "required_action": "Player agents should attempt any clearly justified skill check to build 3 total successes.",
         "failure": "Failure causes hazard backlash and may damage the acting character.",
     },
+    "abbey_negotiation": {
+        "announcement": "Father Balgart receives the party beneath the glow of the everflame, grateful but careful with the abbey's coin. The posted work promises holy purpose, not a listed wage, and he first asks the party to serve as good tidings for the Sun God. The party has three chances to make skillful arguments for payment. Their successes decide whether the abbey pays nothing, 5 gold per undead, 10 gold per undead, or 10 gold per undead plus one healing potion up front.",
+        "required_action": "Player agents may attempt any clearly justified social or roleplay skill check to negotiate payment with Father Balgart. The party has exactly 3 total attempts. 0 successes means no pay; 1 success means 5gp per undead defeated; 2 successes means 10gp per undead defeated; 3 successes means 10gp per undead defeated and one Potion of Healing up front.",
+        "failure": "Failed negotiation checks do not deal damage. They consume one of the 3 negotiation attempts.",
+    },
     "stealth_infiltration": {
         "announcement": "The approach is watched by hostile eyes and nervous hands. Reeds, fog, and broken ground offer cover, but one careless step could carry across the marsh. The party must move silently; anyone who fails the forced Stealth check risks alerting guards.",
         "required_action": "The backend rolls Stealth for each living player on arrival. If any player fails, the listed failure combat begins.",
@@ -220,7 +225,15 @@ def _empty_mission_objective_state(adventure_id: str = "") -> dict:
     if adventure_id == "telas-wagons":
         state.update({"current_step": 0, "allowed_location_ids": ["loc-1"], "visited_location_ids": []})
     elif adventure_id == "endless-glacier-undead":
-        state.update({"undead_kills": 0, "target_kills": 10})
+        state.update({
+            "undead_kills": 0,
+            "target_kills": 10,
+            "abbey_negotiation_complete": False,
+            "abbey_negotiation_successes": 0,
+            "undead_reward_per_kill": 0,
+            "undead_reward_earned": 0,
+            "undead_reward_paid": False,
+        })
     elif adventure_id == "collecting-taxes":
         state.update({"gold_collected": 0, "target_gold": 400})
     elif adventure_id == "icebane-castle":
@@ -256,6 +269,13 @@ def _mission_context_for_agents(session: SessionModel) -> dict:
     }
     if adventure_id == "telas-wagons":
         context["allowed_next_locations"] = state.get("allowed_location_ids", [])
+    if adventure_id == "endless-glacier-undead":
+        context["undead_kills"] = int(state.get("undead_kills", 0) or 0)
+        context["target_kills"] = int(state.get("target_kills", MISSION_OBJECTIVE_CONFIG[adventure_id]["target_kills"]) or 0)
+        context["abbey_negotiation_complete"] = bool(state.get("abbey_negotiation_complete", False))
+        context["abbey_negotiation_successes"] = int(state.get("abbey_negotiation_successes", 0) or 0)
+        context["undead_reward_per_kill"] = int(state.get("undead_reward_per_kill", 0) or 0)
+        context["undead_reward_earned"] = int(state.get("undead_reward_earned", 0) or 0)
     return context
 
 
@@ -294,6 +314,8 @@ def _encounter_context_for_agents(session: SessionModel) -> dict:
             "dc": hazard.get("dc", 13),
             "mode": hazard.get("mode", ""),
             "required_successes": hazard.get("required_successes", 1),
+            "max_attempts": hazard.get("max_attempts", 0),
+            "attempts_used": len(hazard.get("attempts", [])),
             "current_successes": hazard.get("successes", {}),
             "global_successes": hazard.get("global_successes", 0),
             "important": "If the GM prompts you to engage this hazard, use resolve_action with a SKILL action before narrating the outcome. Do not claim success or failure unless the backend roll says so.",
@@ -441,6 +463,7 @@ def _hazard_initial_state(definition: dict) -> dict:
         "skill": config.get("skill", ""),
         "dc": int(config.get("dc", 13)),
         "required_successes": int(config.get("required_successes", 1)),
+        "max_attempts": int(config.get("max_attempts", 0) or 0),
         "mode": config.get("mode", "global"),
         "successes": {},
         "failures": {},
@@ -456,6 +479,93 @@ def _hazard_arrival_announcement(encounter_name: str, hazard_id: str) -> str:
 
 def _trap_arrival_announcement(encounter_name: str, trap_id: str) -> str:
     return TRAP_PRESENTATION.get(trap_id) or f"{encounter_name} reveals a hidden trap. The backend will resolve who notices it and who is caught."
+
+
+def _resolve_abbey_negotiation(
+    db: Session,
+    session: SessionModel,
+    prompt_index: int,
+    hazard: dict,
+    encounter_state: dict,
+    actor_slot: int,
+    actor_name: str,
+    success: bool,
+    total: int,
+) -> tuple[dict, dict, str]:
+    attempts = list(hazard.get("attempts", []))
+    max_attempts = int(hazard.get("max_attempts", 3) or 3)
+    successes = int(hazard.get("global_successes", 0) or 0) + (1 if success else 0)
+    failures = int(hazard.get("global_failures", 0) or 0) + (0 if success else 1)
+    attempts_used = min(max_attempts, len(attempts) + 1)
+    hazard["global_successes"] = successes
+    hazard["global_failures"] = failures
+    hazard["attempts_used"] = attempts_used
+
+    if attempts_used < max_attempts and successes < int(hazard.get("required_successes", 3) or 3):
+        hazard["status"] = "in_progress"
+        encounter_state["status"] = "in_progress"
+        text = (
+            f"{actor_name} presses Father Balgart in negotiation and rolls {total}: "
+            f"{'success' if success else 'failure'}. Negotiation stands at {successes}/{max_attempts} successes "
+            f"after {attempts_used}/{max_attempts} attempts."
+        )
+        return hazard, encounter_state, text
+
+    reward_per_undead = 0
+    outcome_text = "Father Balgart holds firm: the abbey will offer shelter and blessings, but no coin."
+    if successes == 1:
+        reward_per_undead = 5
+        outcome_text = "Father Balgart yields a little and promises 5gp for each undead threat the party puts down."
+    elif successes == 2:
+        reward_per_undead = 10
+        outcome_text = "Father Balgart agrees to a proper bounty of 10gp for each undead threat the party puts down."
+    elif successes >= 3:
+        reward_per_undead = 10
+        outcome_text = "Father Balgart agrees to 10gp for each undead threat and sends the party out with a Potion of Healing up front."
+        _append_state_change(
+            db,
+            session,
+            prompt_index,
+            target_type="player",
+            target_slot=actor_slot,
+            kind="inventory_add",
+            value="Potion of Healing",
+            source="abbey_negotiation",
+            actor_id=f"pc:{actor_slot}",
+        )
+
+    mission_state = copy.deepcopy(session.mission_objective_state or {})
+    mission_state["undead_reward_per_kill"] = reward_per_undead
+    mission_state["abbey_negotiation_successes"] = successes
+    mission_state["abbey_negotiation_complete"] = True
+    mission_state["undead_reward_earned"] = int(mission_state.get("undead_reward_earned", 0) or 0)
+    mission_state["progress_label"] = (
+        f"Undead defeated: {int(mission_state.get('undead_kills', 0) or 0)}/{int(mission_state.get('target_kills', 10) or 10)}. "
+        f"Abbey bounty: {reward_per_undead}gp per undead."
+    )
+    mission_state.setdefault("updates", []).append({"prompt_index": prompt_index, "text": mission_state["progress_label"]})
+    session.mission_objective_state = mission_state
+    _append_system_event(
+        db,
+        session.session_id,
+        prompt_index,
+        EventKind.OBJECTIVE_UPDATED,
+        f"Objective progress: {mission_state['progress_label']}",
+        {
+            "adventure_id": "endless-glacier-undead",
+            "abbey_negotiation_successes": successes,
+            "undead_reward_per_kill": reward_per_undead,
+        },
+    )
+
+    hazard["status"] = "clear"
+    encounter_state["status"] = "clear"
+    encounter_state["active"] = False
+    text = (
+        f"{actor_name} makes the final negotiation attempt with Father Balgart and rolls {total}: "
+        f"{'success' if success else 'failure'}. Final result: {successes}/{max_attempts} successes. {outcome_text}"
+    )
+    return hazard, encounter_state, text
 
 
 def _resolve_east_marsh_arrival_stealth(
@@ -1121,6 +1231,16 @@ def _build_character_payload(db: Session, session: SessionModel, agent_slot: int
     current_state = derive_party_state(db, session.session_id).get(str(agent_slot), {})
     memory_blocks = _current_memory_blocks(db, session.session_id)
     recent_events = _recent_events(db, session)
+    party_roster = [
+        {"slot": slot, "name": PLAYERS[_player_for_slot(tab1, slot)]["name"], "class_id": _class_assignment_for_slot(tab1, slot)}
+        for slot in range(1, 5)
+        if _player_for_slot(tab1, slot) and _class_assignment_for_slot(tab1, slot)
+    ]
+    combat_active = bool((session.combat_state or {}).get("in_combat")) and bool(_build_visible_monster_targets(session))
+    starter_party_prompt_required = (
+        user_text.strip().lower() == "party leader, you know this mission, what is your plan?"
+        and not combat_active
+    )
     return {
         "agent_identity": {
             "slot": agent_slot,
@@ -1166,6 +1286,10 @@ def _build_character_payload(db: Session, session: SessionModel, agent_slot: int
         "current_encounter": _encounter_context_for_agents(session),
         "opposition_state": copy.deepcopy(session.opposition_state or _empty_opposition_state()),
         "mechanical_resolution_hint": _build_player_mechanical_hint(db, session, agent_slot, class_data, user_text),
+        "party_roster": party_roster,
+        "allow_party_prompt": not combat_active,
+        "starter_party_prompt_required": starter_party_prompt_required,
+        "party_prompt_mode": "",
         "user_prompt": user_text,
     }
 
@@ -1642,6 +1766,7 @@ def _resolve_payload_context(payload: dict) -> dict:
         "mechanical_hint": mechanical_hint,
         "opposition_state": opposition_state,
         "class_sheet": class_sheet,
+        "current_encounter": copy.deepcopy(payload.get("current_encounter", {})),
         "visible_monsters": visible_monsters,
     }
 
@@ -2473,6 +2598,19 @@ def resolve_actions_for_payload(payload: dict, args: dict[str, Any]) -> dict[str
                     "target_hp_after": None,
                 }
             )
+            if ability in {"SEARCH", "PERCEPTION", "INVESTIGATION"}:
+                search_state = context.get("current_encounter", {}).get("search", {})
+                loot = [str(item) for item in search_state.get("loot", []) if str(item).strip()]
+                if result["success"] and search_state.get("available") and not search_state.get("found") and loot:
+                    result["found_loot"] = loot
+                    result["reason"] = f"Search succeeds and finds: {', '.join(loot)}."
+                    result["narration_instruction"] = (
+                        "Narrate that you found exactly these item names. Do not invent an ornate box, chest, relic, or extra treasure."
+                    )
+                elif result["success"]:
+                    result["reason"] = "Search succeeds, but the backend has no new loot defined here."
+                else:
+                    result["reason"] = "Search fails and finds nothing useful."
             results.append(result)
             continue
 
@@ -2685,18 +2823,19 @@ def _run_summarization(db: Session, session: SessionModel, to_prompt_index: int)
         return True
 
 
-def _append_system_event(db: Session, session_id: str, prompt_index: int, kind: EventKind, text: str, payload: dict) -> None:
-    db.add(
-        Event(
-            session_id=session_id,
-            prompt_index=prompt_index,
-            role=EventRole.SYSTEM,
-            kind=kind,
-            agent_slot=None,
-            text=text,
-            json_payload=payload,
-        )
+def _append_system_event(db: Session, session_id: str, prompt_index: int, kind: EventKind, text: str, payload: dict) -> Event:
+    event = Event(
+        session_id=session_id,
+        prompt_index=prompt_index,
+        role=EventRole.SYSTEM,
+        kind=kind,
+        agent_slot=None,
+        text=text,
+        json_payload=payload,
     )
+    db.add(event)
+    db.flush()
+    return event
 
 
 def _slot_from_actor_id(actor_id: str) -> int:
@@ -2808,6 +2947,31 @@ def _apply_hazard_skill_result(db: Session, session: SessionModel, agent_slot: i
     text = ""
 
     if mode == "party_once":
+        return
+    if mode == "negotiation":
+        hazard, encounter_state, text = _resolve_abbey_negotiation(
+            db,
+            session,
+            prompt_index,
+            hazard,
+            encounter_state,
+            agent_slot,
+            name,
+            success,
+            total,
+        )
+        hazard.setdefault("attempts", []).append({"agent_slot": agent_slot, "total": total, "success": success, "prompt_index": prompt_index})
+        encounter_state["hazard"] = hazard
+        session.encounter_state = encounter_state
+        if text:
+            _append_system_event(
+                db,
+                session.session_id,
+                prompt_index,
+                EventKind.TRANSCRIPT,
+                text,
+                {"source": "hazard_skill", "success": success, "agent_slot": agent_slot, "hazard_id": hazard.get("hazard_id", ""), "total": total},
+            )
         return
     if mode == "per_player":
         successes = dict(hazard.get("successes", {}))
@@ -2950,18 +3114,44 @@ def _apply_monster_death_objective_updates(
     if adventure_id == "endless-glacier-undead":
         target_kills = int(state.get("target_kills", MISSION_OBJECTIVE_CONFIG[adventure_id]["target_kills"]))
         current = int(state.get("undead_kills", 0)) + 1
+        reward_per_kill = int(state.get("undead_reward_per_kill", 0) or 0)
+        reward_text = ""
+        if reward_per_kill > 0:
+            earned = int(state.get("undead_reward_earned", 0) or 0) + reward_per_kill
+            state["undead_reward_earned"] = earned
+            reward_text = f" Abbey bounty earned: {earned}gp."
         state["undead_kills"] = current
         if current >= target_kills:
+            earned_total = int(state.get("undead_reward_earned", 0) or 0)
+            if actor_slot and earned_total > 0 and not state.get("undead_reward_paid"):
+                _append_state_change(
+                    db,
+                    session,
+                    prompt_index,
+                    target_type="player",
+                    target_slot=actor_slot,
+                    kind="inventory_add",
+                    value=f"{earned_total}gp",
+                    source="mission_objective",
+                    actor_id=actor_id,
+                )
+                state["undead_reward_paid"] = True
             _set_mission_complete(
                 db,
                 session,
                 prompt_index,
                 state,
-                f"Undead defeated: {target_kills}/{target_kills}.",
-                {"adventure_id": adventure_id, "undead_kills": current, "target_kills": target_kills},
+                f"Undead defeated: {target_kills}/{target_kills}.{reward_text}",
+                {
+                    "adventure_id": adventure_id,
+                    "undead_kills": current,
+                    "target_kills": target_kills,
+                    "undead_reward_per_kill": reward_per_kill,
+                    "undead_reward_earned": int(state.get("undead_reward_earned", 0) or 0),
+                },
             )
             return
-        note = f"Undead defeated: {current}/{target_kills}."
+        note = f"Undead defeated: {current}/{target_kills}.{reward_text}"
         state["progress_label"] = note
         state.setdefault("updates", []).append({"prompt_index": prompt_index, "text": note})
         session.mission_objective_state = state
@@ -2971,7 +3161,13 @@ def _apply_monster_death_objective_updates(
             prompt_index,
             EventKind.OBJECTIVE_UPDATED,
             f"Objective progress: {note}",
-            {"adventure_id": adventure_id, "undead_kills": current, "target_kills": target_kills},
+            {
+                "adventure_id": adventure_id,
+                "undead_kills": current,
+                "target_kills": target_kills,
+                "undead_reward_per_kill": reward_per_kill,
+                "undead_reward_earned": int(state.get("undead_reward_earned", 0) or 0),
+            },
         )
         return
 
@@ -3573,6 +3769,232 @@ def _create_agent_transcript_event(
     return agent_event
 
 
+def _party_prompt_text(session: SessionModel, source_slot: int, target_slot: int, message: str, mode: str) -> str:
+    source_name = session.agent_names.get(str(source_slot), _default_name(source_slot))
+    target_name = session.agent_names.get(str(target_slot), _default_name(target_slot))
+    verb = "asks" if mode == "question" else "says to"
+    return f"{source_name} {verb} {target_name}: {message}"
+
+
+def _starter_party_prompt_fallback(session: SessionModel, source_slot: int) -> dict[str, Any] | None:
+    target_slot: int | None = None
+    for slot in session.selected_agent_slots:
+        if slot != source_slot and session.agent_names.get(str(slot), "").strip().lower() == "annie":
+            target_slot = slot
+            break
+    if target_slot is None:
+        target_slot = next((slot for slot in session.selected_agent_slots if slot != source_slot), None)
+    if target_slot is None:
+        return None
+    target_name = session.agent_names.get(str(target_slot), _default_name(target_slot))
+    return {
+        "accepted": True,
+        "source_slot": source_slot,
+        "target_slot": target_slot,
+        "mode": "question",
+        "message": (
+            f"{target_name}, before we commit to this plan, what risks or hidden angles "
+            "do you think we should watch for?"
+        ),
+        "source": "starter_fallback",
+    }
+
+
+def _party_followup_expected_agent_events(party_request: dict[str, Any] | None) -> int:
+    if not party_request:
+        return 0
+    return 2 if str(party_request.get("mode", "") or "").lower() == "question" else 1
+
+
+def _run_party_prompt_chain(
+    db: Session,
+    session: SessionModel,
+    prompt_index: int,
+    source_slot: int,
+    party_request: dict[str, Any],
+) -> list[Event]:
+    if (session.combat_state or {}).get("in_combat"):
+        return []
+    target_slot = int(party_request.get("target_slot", 0) or 0)
+    mode = str(party_request.get("mode", "") or "").lower()
+    message = str(party_request.get("message", "") or "").strip()
+    if mode not in {"statement", "question"} or target_slot == source_slot or target_slot not in session.selected_agent_slots:
+        return []
+
+    provider = get_provider()
+    created_events: list[Event] = []
+    source_name = session.agent_names.get(str(source_slot), _default_name(source_slot))
+    target_name = session.agent_names.get(str(target_slot), _default_name(target_slot))
+    intro = _append_system_event(
+        db,
+        session.session_id,
+        prompt_index,
+        EventKind.TRANSCRIPT,
+        _party_prompt_text(session, source_slot, target_slot, message, mode),
+        {
+            "source": "party_prompt",
+            "source_slot": source_slot,
+            "target_slot": target_slot,
+            "mode": mode,
+            "message": message,
+        },
+    )
+    created_events.append(intro)
+
+    target_payload = _build_character_payload(
+        db,
+        session,
+        target_slot,
+        (
+            f"{source_name} addressed you directly outside combat: {message}\n\n"
+            "Respond once in character. Do not request another party response."
+        ),
+    )
+    target_payload["allow_party_prompt"] = False
+    target_payload["party_prompt_mode"] = "response"
+    target_generation = provider.generate_action_response("agent_character", settings.llm_model_character, target_payload)
+    target_content = (target_generation.content or "").strip() or f"{target_name} considers the words and gives a brief reply."
+    target_event = _create_agent_transcript_event(db, session.session_id, prompt_index, target_slot, target_content)
+    created_events.append(target_event)
+    log_artifact(
+        db,
+        session.session_id,
+        "agent_party_response",
+        settings.llm_model_character,
+        target_payload,
+        json.dumps({"content": target_content, "party_prompt_mode": "response"}, ensure_ascii=True),
+        provider.provider_name,
+    )
+
+    if mode == "question":
+        ack_payload = _build_character_payload(
+            db,
+            session,
+            source_slot,
+            (
+                f"{target_name} answered your question: {target_content}\n\n"
+                "Acknowledge their reply briefly in character. This ends the party conversation chain."
+            ),
+        )
+        ack_payload["allow_party_prompt"] = False
+        ack_payload["party_prompt_mode"] = "acknowledgement"
+        ack_generation = provider.generate_action_response("agent_character", settings.llm_model_character, ack_payload)
+        ack_content = (ack_generation.content or "").strip() or f"{source_name} acknowledges the reply."
+        ack_event = _create_agent_transcript_event(db, session.session_id, prompt_index, source_slot, ack_content)
+        created_events.append(ack_event)
+        log_artifact(
+            db,
+            session.session_id,
+            "agent_party_ack",
+            settings.llm_model_character,
+            ack_payload,
+            json.dumps({"content": ack_content, "party_prompt_mode": "acknowledgement"}, ensure_ascii=True),
+            provider.provider_name,
+        )
+
+    return created_events
+
+
+def run_party_prompt_followup(
+    session_id: str,
+    prompt_index: int,
+    source_slot: int,
+    party_request: dict[str, Any],
+) -> None:
+    db = SessionLocal()
+    try:
+        session = get_session_or_404(db, session_id)
+        if (session.combat_state or {}).get("in_combat"):
+            return
+        target_slot = int(party_request.get("target_slot", 0) or 0)
+        mode = str(party_request.get("mode", "") or "").lower()
+        message = str(party_request.get("message", "") or "").strip()
+        if mode not in {"statement", "question"} or target_slot == source_slot or target_slot not in session.selected_agent_slots:
+            return
+
+        provider = get_provider()
+        source_name = session.agent_names.get(str(source_slot), _default_name(source_slot))
+        target_name = session.agent_names.get(str(target_slot), _default_name(target_slot))
+        _append_system_event(
+            db,
+            session.session_id,
+            prompt_index,
+            EventKind.TRANSCRIPT,
+            _party_prompt_text(session, source_slot, target_slot, message, mode),
+            {
+                "source": "party_prompt",
+                "source_slot": source_slot,
+                "target_slot": target_slot,
+                "mode": mode,
+                "message": message,
+            },
+        )
+        db.commit()
+
+        target_payload = _build_character_payload(
+            db,
+            session,
+            target_slot,
+            (
+                f"{source_name} addressed you directly outside combat: {message}\n\n"
+                "Respond once in character. Do not request another party response."
+            ),
+        )
+        target_payload["allow_party_prompt"] = False
+        target_payload["party_prompt_mode"] = "response"
+        target_generation = provider.generate_action_response("agent_character", settings.llm_model_character, target_payload)
+        target_content = (target_generation.content or "").strip() or f"{target_name} considers the words and gives a brief reply."
+        _create_agent_transcript_event(db, session.session_id, prompt_index, target_slot, target_content)
+        log_artifact(
+            db,
+            session.session_id,
+            "agent_party_response",
+            settings.llm_model_character,
+            target_payload,
+            json.dumps({"content": target_content, "party_prompt_mode": "response"}, ensure_ascii=True),
+            provider.provider_name,
+        )
+        db.commit()
+
+        if mode != "question":
+            return
+
+        ack_payload = _build_character_payload(
+            db,
+            session,
+            source_slot,
+            (
+                f"{target_name} answered your question: {target_content}\n\n"
+                "Acknowledge their reply briefly in character. This ends the party conversation chain."
+            ),
+        )
+        ack_payload["allow_party_prompt"] = False
+        ack_payload["party_prompt_mode"] = "acknowledgement"
+        ack_generation = provider.generate_action_response("agent_character", settings.llm_model_character, ack_payload)
+        ack_content = (ack_generation.content or "").strip() or f"{source_name} acknowledges the reply."
+        _create_agent_transcript_event(db, session.session_id, prompt_index, source_slot, ack_content)
+        log_artifact(
+            db,
+            session.session_id,
+            "agent_party_ack",
+            settings.llm_model_character,
+            ack_payload,
+            json.dumps({"content": ack_content, "party_prompt_mode": "acknowledgement"}, ensure_ascii=True),
+            provider.provider_name,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Party prompt follow-up failed: session=%s prompt=%s source_slot=%s",
+            session_id,
+            prompt_index,
+            source_slot,
+        )
+    finally:
+        db.close()
+
+
 def finalize_prompt_narration(
     session_id: str,
     prompt_index: int,
@@ -3636,7 +4058,7 @@ def prompt_agent(
     session_id: str,
     agent_slot: int,
     user_text: str,
-) -> tuple[SessionModel, Event, Event | None, bool, list[Event], dict[str, Any] | None]:
+) -> tuple[SessionModel, Event, Event | None, bool, list[Event], list[Event], dict[str, Any] | None, dict[str, Any] | None]:
     provider = get_provider()
     session = get_session_or_404(db, session_id)
     if session.state != SessionState.ACTIVE:
@@ -3679,6 +4101,7 @@ def prompt_agent(
                     "rolls": generation.pending_roll_results,
                     "actions": generation.pending_action_results,
                     "state_changes": generation.pending_state_changes,
+                    "party_requests": generation.party_requests or [],
                     "narration_pending": generation.narration_pending,
                 },
                 ensure_ascii=True,
@@ -3702,6 +4125,7 @@ def prompt_agent(
                     "rolls": generation.pending_roll_results,
                     "actions": generation.pending_action_results,
                     "state_changes": generation.pending_state_changes,
+                    "party_requests": generation.party_requests or [],
                     "narration_pending": generation.narration_pending,
                 },
                 ensure_ascii=True,
@@ -3725,6 +4149,26 @@ def prompt_agent(
         agent_event = _create_agent_transcript_event(db, session_id, session.prompt_index, agent_slot, generation.content)
 
     _apply_generation_result(db, session, agent_slot, session.prompt_index, generation)
+    extra_events: list[Event] = []
+    party_followup_job: dict[str, Any] | None = None
+    if (
+        not generation.narration_pending
+        and agent_slot != OPPOSITION_AGENT_SLOT
+        and not (session.combat_state or {}).get("in_combat")
+    ):
+        party_requests = list(generation.party_requests or [])
+        if not party_requests and agent_payload.get("starter_party_prompt_required"):
+            fallback_request = _starter_party_prompt_fallback(session, agent_slot)
+            if fallback_request:
+                party_requests = [fallback_request]
+        if party_requests:
+            party_followup_job = {
+                "session_id": session_id,
+                "prompt_index": session.prompt_index,
+                "source_slot": agent_slot,
+                "party_request": party_requests[0],
+                "expected_agent_events": _party_followup_expected_agent_events(party_requests[0]),
+            }
     _ensure_nonblocking_opposition_state(db, session)
     _append_system_event(db, session_id, session.prompt_index, EventKind.TURN_ENDED, f"Turn ended for {session.agent_names.get(str(agent_slot), _default_name(agent_slot))}.", {"agent_slot": agent_slot})
     _advance_combat_turn(db, session, _combatant_id_for_slot(agent_slot))
@@ -3741,8 +4185,10 @@ def prompt_agent(
     db.refresh(user_event)
     if agent_event is not None:
         db.refresh(agent_event)
+    for event in extra_events:
+        db.refresh(event)
     prompt_events = _prompt_system_events(db, session_id, session.prompt_index)
-    return session, user_event, agent_event, summary_triggered, prompt_events, continuation_job
+    return session, user_event, agent_event, summary_triggered, prompt_events, extra_events, continuation_job, party_followup_job
 
 
 def end_chapter(db: Session, session_id: str) -> SessionModel:

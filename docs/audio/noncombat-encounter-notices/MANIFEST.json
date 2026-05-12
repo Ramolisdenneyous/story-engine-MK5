@@ -1,0 +1,122 @@
+[
+  {
+    "adventure_id": "icebane-castle",
+    "adventure_title": "Treasure Hunting the Ruins of Icebane Castle",
+    "location_id": "loc-3",
+    "location_title": "The Collapsed Barracks",
+    "encounter_type": "trap",
+    "encounter_name": "Rolling Stone Boulders",
+    "file": "docs\\audio\\noncombat-encounter-notices\\icebane-castle-loc-3-rolling-stone-boulders.mp3",
+    "text": "Trap: Rolling Stone Boulders. A low grinding sound rolls through the ruin before the stones move. The passage becomes a sudden avalanche of old masonry, forcing quick awareness and raw strength to survive the boulders."
+  },
+  {
+    "adventure_id": "east-marsh-raid",
+    "adventure_title": "Midnight Raid of the East Marsh Orcs",
+    "location_id": "loc-1",
+    "location_title": "The Blackwater Approach",
+    "encounter_type": "hazard",
+    "encounter_name": "Blackwater Approach",
+    "file": "docs\\audio\\noncombat-encounter-notices\\east-marsh-raid-loc-1-blackwater-approach.mp3",
+    "text": "Hazard: Blackwater Approach. The approach is watched by hostile eyes and nervous hands. Reeds, fog, and broken ground offer cover, but one careless step could carry across the marsh. The party must move silently; anyone who fails the forced Stealth check risks alerting guards."
+  },
+  {
+    "adventure_id": "east-marsh-raid",
+    "adventure_title": "Midnight Raid of the East Marsh Orcs",
+    "location_id": "loc-2",
+    "location_title": "The Watcher's Rise",
+    "encounter_type": "hazard",
+    "encounter_name": "Watcher's Rise",
+    "file": "docs\\audio\\noncombat-encounter-notices\\east-marsh-raid-loc-2-watcher-s-rise.mp3",
+    "text": "Hazard: Watcher's Rise. The approach is watched by hostile eyes and nervous hands. Reeds, fog, and broken ground offer cover, but one careless step could carry across the marsh. The party must move silently; anyone who fails the forced Stealth check risks alerting guards."
+  },
+  {
+    "adventure_id": "east-marsh-raid",
+    "adventure_title": "Midnight Raid of the East Marsh Orcs",
+    "location_id": "loc-3",
+    "location_title": "The Outer Camp Ring",
+    "encounter_type": "hazard",
+    "encounter_name": "Outer Camp Ring",
+    "file": "docs\\audio\\noncombat-encounter-notices\\east-marsh-raid-loc-3-outer-camp-ring.mp3",
+    "text": "Hazard: Outer Camp Ring. The outer camp can be pulled out of rhythm, but only with careful timing. A thrown sound, a false trail, a convincing signal, or another justified tactic could open the route. The party needs three successful distractions; a botched attempt draws hostile attention."
+  },
+  {
+    "adventure_id": "east-marsh-raid",
+    "adventure_title": "Midnight Raid of the East Marsh Orcs",
+    "location_id": "loc-4",
+    "location_title": "The Supply Cache Pit",
+    "encounter_type": "hazard",
+    "encounter_name": "Supply Cache Pit",
+    "file": "docs\\audio\\noncombat-encounter-notices\\east-marsh-raid-loc-4-supply-cache-pit.mp3",
+    "text": "Hazard: Supply Cache Pit. The approach is watched by hostile eyes and nervous hands. Reeds, fog, and broken ground offer cover, but one careless step could carry across the marsh. The party must move silently; anyone who fails the forced Stealth check risks alerting guards."
+  },
+  {
+    "adventure_id": "east-marsh-raid",
+    "adventure_title": "Midnight Raid of the East Marsh Orcs",
+    "location_id": "loc-6",
+    "location_title": "The Fog-Choked Escape Channel",
+    "encounter_type": "hazard",
+    "encounter_name": "Fog-Choked Escape Channel",
+    "file": "docs\\audio\\noncombat-encounter-notices\\east-marsh-raid-loc-6-fog-choked-escape-channel.mp3",
+    "text": "Hazard: Fog-Choked Escape Channel. Fog rolls low over a black escape channel. The water is freezing, the current drags sideways, and the far bank is more sensed than seen. Each adventurer must fight through the crossing with repeated Athletics checks; failure means the water takes its price."
+  },
+  {
+    "adventure_id": "telas-wagons",
+    "adventure_title": "Escort of the Telos Supply Wagons along the King's Way",
+    "location_id": "loc-1",
+    "location_title": "The Western Tundra Stretch",
+    "encounter_type": "hazard",
+    "encounter_name": "Mud-Stuck Wagon",
+    "file": "docs\\audio\\noncombat-encounter-notices\\telas-wagons-loc-1-mud-stuck-wagon.mp3",
+    "text": "Hazard: Mud-Stuck Wagon. The wagon has sunk deep into sucking road-mud, wheels buried almost to the hubs. The team strains uselessly unless the party can coordinate leverage, clearing, pushing, or another sound approach. Three successful efforts will free it; poor attempts risk injury and wasted time."
+  },
+  {
+    "adventure_id": "telas-wagons",
+    "adventure_title": "Escort of the Telos Supply Wagons along the King's Way",
+    "location_id": "loc-6",
+    "location_title": "The Glockstead Approach",
+    "encounter_type": "story",
+    "encounter_name": "Glockstead Approach",
+    "file": "docs\\audio\\noncombat-encounter-notices\\telas-wagons-loc-6-glockstead-approach.mp3",
+    "text": "Glockstead Approach. The wagons reach Glockstead. The mission objective is complete."
+  },
+  {
+    "adventure_id": "old-people-barrow",
+    "adventure_title": "Tombrobbing the Old-People's Barrow",
+    "location_id": "loc-1",
+    "location_title": "The Frost-Cleft Entrance",
+    "encounter_type": "trap",
+    "encounter_name": "Rolling Stone Boulders",
+    "file": "docs\\audio\\noncombat-encounter-notices\\old-people-barrow-loc-1-rolling-stone-boulders.mp3",
+    "text": "Trap: Rolling Stone Boulders. A low grinding sound rolls through the ruin before the stones move. The passage becomes a sudden avalanche of old masonry, forcing quick awareness and raw strength to survive the boulders."
+  },
+  {
+    "adventure_id": "old-people-barrow",
+    "adventure_title": "Tombrobbing the Old-People's Barrow",
+    "location_id": "loc-4",
+    "location_title": "The Sealed Door",
+    "encounter_type": "hazard",
+    "encounter_name": "Puzzle Door",
+    "file": "docs\\audio\\noncombat-encounter-notices\\old-people-barrow-loc-4-puzzle-door.mp3",
+    "text": "Hazard: Puzzle Door. A sealed stone door bars the way, its surface carved with old marks half-hidden beneath frost and soot. The mechanism is listening for the right history, not brute force. The party needs three good insights to open it; wrong answers rattle the ruin and punish carelessness."
+  },
+  {
+    "adventure_id": "old-people-barrow",
+    "adventure_title": "Tombrobbing the Old-People's Barrow",
+    "location_id": "loc-6",
+    "location_title": "The Fractured Escape Tunnel",
+    "encounter_type": "hazard",
+    "encounter_name": "Steep Cliffside",
+    "file": "docs\\audio\\noncombat-encounter-notices\\old-people-barrow-loc-6-steep-cliffside.mp3",
+    "text": "Hazard: Steep Cliffside. The path pinches against a wind-scoured cliffside. Ice-slick stone offers only narrow handholds, and every upward pull sends loose shale ticking into the drop below. Each adventurer must make steady Athletics progress to climb clear; failed efforts mean slips, bruising impacts, and lost ground."
+  },
+  {
+    "adventure_id": "endless-glacier-undead",
+    "adventure_title": "Putting to Rest the Undead Along the Endless Glacier",
+    "location_id": "loc-1",
+    "location_title": "Everflame Abbey",
+    "encounter_type": "hazard",
+    "encounter_name": "Everflame Abbey Negotiation",
+    "file": "docs\\audio\\noncombat-encounter-notices\\endless-glacier-undead-loc-1-everflame-abbey.mp3",
+    "text": "Hazard: Everflame Abbey Negotiation. Father Balgart receives the party beneath the glow of the everflame, grateful but careful with the abbey's coin. The flyer promised holy work, but named no wage, and the Father first asks the party to serve as good tidings for the Sun God. The party has three chances to convince him. Zero successes earns no pay. One success earns five gold per undead defeated. Two successes earns ten gold per undead defeated. Three successes earns ten gold per undead defeated, plus one healing potion up front for the journey."
+  }
+]

@@ -9,20 +9,60 @@ import {
   OPPOSITION_SLOT,
   PromptResponse,
   SessionDetail,
+  TranscriptEvent,
   TtsState,
 } from "./appTypes";
 import { AdventureTab } from "./components/AdventureTab";
 import { FeedbackTab } from "./components/FeedbackTab";
 import { PreparationTab } from "./components/PreparationTab";
 
-const MUSIC_TRACKS = [
-  "Citadel of Rusted Banners (1).mp3",
-  "Citadel of Rusted Banners.mp3",
-  "Cursed Village Menu (1).mp3",
-  "Cursed Village Menu.mp3",
-  "Gallows of the Forgotten King.mp3",
-].map((fileName) => resolveApiUrl(`/music/${encodeURIComponent(fileName)}`));
+type MusicCue = "inn" | "adventure" | "combat" | "victory";
+
+const MUSIC_TRACKS: Record<MusicCue, string[]> = {
+  inn: [
+    "Citadel of Rusted Banners.mp3",
+    "Citadel of Rusted Banners (1).mp3",
+  ],
+  adventure: ["Cursed Village Menu (1).mp3"],
+  combat: ["Cursed Village Menu.mp3"],
+  victory: ["Gallows of the Forgotten King.mp3"],
+};
+const MUSIC_CUE_LABELS: Record<MusicCue, string> = {
+  inn: "Inn",
+  adventure: "Adventure",
+  combat: "Combat",
+  victory: "Victory",
+};
+const MUSIC_TRACK_URLS = Object.fromEntries(
+  Object.entries(MUSIC_TRACKS).map(([cue, fileNames]) => [
+    cue,
+    fileNames.map((fileName) => resolveApiUrl(`/music/${encodeURIComponent(fileName)}`)),
+  ]),
+) as Record<MusicCue, string[]>;
 const VALASKA_INTRO_AUDIO_URL = resolveApiUrl("/audio/valaska-intro.mp3");
+const ENCOUNTER_NOTICE_AUDIO: Record<string, string> = {
+  "icebane-castle:loc-3": "icebane-castle-loc-3-rolling-stone-boulders.mp3",
+  "east-marsh-raid:loc-1": "east-marsh-raid-loc-1-blackwater-approach.mp3",
+  "east-marsh-raid:loc-2": "east-marsh-raid-loc-2-watcher-s-rise.mp3",
+  "east-marsh-raid:loc-3": "east-marsh-raid-loc-3-outer-camp-ring.mp3",
+  "east-marsh-raid:loc-4": "east-marsh-raid-loc-4-supply-cache-pit.mp3",
+  "east-marsh-raid:loc-6": "east-marsh-raid-loc-6-fog-choked-escape-channel.mp3",
+  "telas-wagons:loc-1": "telas-wagons-loc-1-mud-stuck-wagon.mp3",
+  "telas-wagons:loc-6": "telas-wagons-loc-6-glockstead-approach.mp3",
+  "old-people-barrow:loc-1": "old-people-barrow-loc-1-rolling-stone-boulders.mp3",
+  "old-people-barrow:loc-4": "old-people-barrow-loc-4-puzzle-door.mp3",
+  "old-people-barrow:loc-6": "old-people-barrow-loc-6-steep-cliffside.mp3",
+  "endless-glacier-undead:loc-1": "endless-glacier-undead-loc-1-everflame-abbey.mp3",
+};
+const ENCOUNTER_NOTICE_TYPES = new Set(["trap", "hazard", "story"]);
+const ENCOUNTER_VISUALS: Record<string, string> = {
+  "icebane-castle:loc-3": "Encounter-The-Collapsed-Barracks-TRAP.webp",
+  "east-marsh-raid:loc-6": "Encounter-The Fog-Choked Escape Channel-Hazard.webp",
+  "telas-wagons:loc-1": "Encounter-The Western Tundra Stretch-Hazard.webp",
+  "old-people-barrow:loc-1": "Encounter-The Frost-Cleft Entrance-TRAP.webp",
+  "old-people-barrow:loc-6": "Encounter-The Fractured Escape Tunnel-Hazard.webp",
+  "endless-glacier-undead:loc-1": "Encounter-Everflame Abbey-NPC.webp",
+};
 
 const ADVENTURE_TITLE_OVERRIDES: Record<string, string> = {
   "icebane-castle": "Memories of the Witch King",
@@ -39,7 +79,8 @@ const TTS_STATUS_LABELS = {
   playing: "Playing",
 } as const satisfies Record<TtsState, string>;
 
-const MUSIC_VOLUME = 0.015;
+const MUSIC_VOLUME = 0.014;
+const MUSIC_DUCKED_VOLUME = 0.006;
 const TTS_REQUEST_TIMEOUT_MS = 25000;
 const TTS_PLAYER_GAIN: Record<string, number> = {
   Beau: 1,
@@ -57,6 +98,7 @@ const OPPOSITION_STARTER_PROMPT = "The monster gets the drop on the party, and a
 const DEFAULT_TUTORIAL_VIDEO_URL = "https://www.youtube.com/watch?v=eJarez0LH-E";
 const TUTORIAL_VIDEO_URL = import.meta.env.VITE_TUTORIAL_VIDEO_URL || DEFAULT_TUTORIAL_VIDEO_URL;
 type OnboardingGuideStep = "starter" | "adventure-map" | "location-one" | "travel" | "trigger-encounter" | "start-encounter" | "opposition-prompt" | "complete";
+const TTS_QUEUE_LIMIT = 3;
 
 function youtubeEmbedUrl(rawUrl: string) {
   const value = rawUrl.trim();
@@ -190,9 +232,31 @@ function locationImageUrl(title: string) {
   return `/assets/Location-${slug}.webp`;
 }
 
+function encounterNoticeAudioUrl(adventureId: string, locationId: string) {
+  const fileName = ENCOUNTER_NOTICE_AUDIO[`${adventureId}:${locationId}`];
+  return fileName ? resolveApiUrl(`/audio/noncombat-encounter-notices/${encodeURIComponent(fileName)}`) : "";
+}
+
+function encounterVisualUrl(adventureId: string, locationId: string) {
+  const fileName = ENCOUNTER_VISUALS[`${adventureId}:${locationId}`];
+  return fileName ? `/assets/${fileName}` : "";
+}
+
+function isEncounterNoticeEvent(event: TranscriptEvent) {
+  const payload = event.json_payload ?? {};
+  const source = typeof payload.source === "string" ? payload.source : "";
+  const encounterType = typeof payload.encounter_type === "string" ? payload.encounter_type : "";
+  const locationId = typeof payload.location_id === "string" ? payload.location_id : "";
+  return event.role === "system" && event.kind === "transcript" && source === "encounter_start" && ENCOUNTER_NOTICE_TYPES.has(encounterType) && Boolean(locationId);
+}
+
 export function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const introAudioRef = useRef<HTMLAudioElement | null>(null);
+  const encounterNoticeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const encounterNoticePlayingRef = useRef(false);
+  const encounterNoticeBaselineReadyRef = useRef(false);
+  const playedEncounterNoticeEventIdsRef = useRef<Set<string>>(new Set());
   const transcriptRef = useRef<HTMLDivElement>(null);
   const speechAudioRef = useRef<HTMLAudioElement | null>(null);
   const speechAudioContextRef = useRef<AudioContext | null>(null);
@@ -201,7 +265,15 @@ export function App() {
   const speechObjectUrlRef = useRef<string | null>(null);
   const speechAbortRef = useRef<AbortController | null>(null);
   const autoPlayBaselineRef = useRef<string | null>(null);
+  const ttsQueueRef = useRef<TranscriptEvent[]>([]);
+  const ttsQueuedEventIdsRef = useRef<Set<string>>(new Set());
+  const ttsPreloadPromisesRef = useRef<Map<string, Promise<string>>>(new Map());
+  const ttsPreloadControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const ttsPreloadObjectUrlsRef = useRef<Set<string>>(new Set());
+  const ttsProcessingRef = useRef(false);
   const narrationPollTokenRef = useRef(0);
+  const partyFollowupPollTokenRef = useRef(0);
+  const previousMusicCueRef = useRef<MusicCue>("inn");
   const adventureTabTopRef = useRef<HTMLDivElement | null>(null);
 
   const [catalogBoot, setCatalogBoot] = useState<CatalogBoot | null>(null);
@@ -215,9 +287,10 @@ export function App() {
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackSubmittedAt, setFeedbackSubmittedAt] = useState("");
   const [error, setError] = useState("");
-  const [trackIndex, setTrackIndex] = useState(0);
-  const [musicPlaying, setMusicPlaying] = useState(false);
+  const [musicTrackIndex, setMusicTrackIndex] = useState(0);
+  const [musicPlaying, setMusicPlaying] = useState(true);
   const [musicMuted, setMusicMuted] = useState(false);
+  const [musicAutoplayBlocked, setMusicAutoplayBlocked] = useState(false);
   const [adventureId, setAdventureId] = useState("");
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
   const [classByPlayer, setClassByPlayer] = useState<Record<string, string>>({});
@@ -228,6 +301,8 @@ export function App() {
   const [ttsAutoPlay, setTtsAutoPlay] = useState(true);
   const [ttsState, setTtsState] = useState<TtsState>("idle");
   const [ttsError, setTtsError] = useState("");
+  const [currentTtsReply, setCurrentTtsReply] = useState<TranscriptEvent | null>(null);
+  const [encounterNoticeImageUrl, setEncounterNoticeImageUrl] = useState("");
   const [travelLoading, setTravelLoading] = useState(false);
   const [longRestLoading, setLongRestLoading] = useState(false);
   const [encounterModalOpen, setEncounterModalOpen] = useState(false);
@@ -273,6 +348,7 @@ export function App() {
       response.user_event,
       ...(response.agent_event ? [response.agent_event] : []),
       ...response.system_events,
+      ...(response.extra_events ?? []),
     ];
     const dedupedEvents = mergedEvents.filter((eventItem, index, all) => (
       all.findIndex((candidate) => candidate.event_id === eventItem.event_id) === index
@@ -307,6 +383,28 @@ export function App() {
     if (narrationPollTokenRef.current === pollToken) {
       setPromptNarrationPending(false);
       setError("Agent narration is taking longer than expected. Try refreshing the session state.");
+    }
+  }
+
+  async function waitForPartyFollowups(promptIndex: number, initialAgentEventId: string | null, expectedAgentEvents: number, id = sessionId) {
+    if (!expectedAgentEvents) return;
+    const pollToken = partyFollowupPollTokenRef.current + 1;
+    partyFollowupPollTokenRef.current = pollToken;
+    for (let attempt = 0; attempt < 90; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
+      const refreshed = await refresh(id);
+      if (partyFollowupPollTokenRef.current !== pollToken) {
+        return;
+      }
+      const followupAgentEvents = refreshed.events.filter((event) => (
+        event.prompt_index === promptIndex
+        && event.role === "agent"
+        && event.kind === "transcript"
+        && event.event_id !== initialAgentEventId
+      ));
+      if (followupAgentEvents.length >= expectedAgentEvents) {
+        return;
+      }
     }
   }
 
@@ -383,6 +481,21 @@ export function App() {
   }, [detail?.events.length, detail?.session.prompt_index]);
 
   useEffect(() => {
+    if (!detail) return;
+    const eligibleEvents = detail.events.filter(isEncounterNoticeEvent);
+    if (!encounterNoticeBaselineReadyRef.current) {
+      eligibleEvents.forEach((event) => playedEncounterNoticeEventIdsRef.current.add(event.event_id));
+      encounterNoticeBaselineReadyRef.current = true;
+      return;
+    }
+
+    const nextEvent = eligibleEvents.find((event) => !playedEncounterNoticeEventIdsRef.current.has(event.event_id));
+    if (!nextEvent) return;
+    playedEncounterNoticeEventIdsRef.current.add(nextEvent.event_id);
+    playEncounterNoticeAudio(nextEvent);
+  }, [detail?.events.length, adventureId]);
+
+  useEffect(() => {
     const speechAudio = new Audio();
     speechAudioRef.current = speechAudio;
     const onEnded = () => setTtsState("idle");
@@ -414,19 +527,20 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.load();
-    audio.volume = MUSIC_VOLUME;
-    audio.muted = musicMuted;
-    if (musicPlaying) {
-      void audio.play().catch(() => {
-        setMusicPlaying(false);
-      });
-    } else {
-      audio.pause();
-    }
-  }, [trackIndex, musicPlaying, musicMuted]);
+    return () => {
+      encounterNoticeAudioRef.current?.pause();
+      encounterNoticeAudioRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    encounterNoticeAudioRef.current?.pause();
+    encounterNoticeAudioRef.current = null;
+    encounterNoticePlayingRef.current = false;
+    setEncounterNoticeImageUrl("");
+    encounterNoticeBaselineReadyRef.current = false;
+    playedEncounterNoticeEventIdsRef.current.clear();
+  }, [sessionId]);
 
   useEffect(() => {
     if (!chapterStarting) {
@@ -477,22 +591,30 @@ export function App() {
     void introAudio.play().catch(() => undefined);
   }, [detail?.session.tab1_locked, introAudioPlayed, splashOpen, tab]);
 
-  async function toggleMusicPlayback() {
+  async function enableMusicPlayback() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    try {
+      audio.volume = ttsState === "playing" ? MUSIC_DUCKED_VOLUME : MUSIC_VOLUME;
+      audio.muted = musicMuted;
+      await audio.play();
+      setMusicPlaying(true);
+      setMusicAutoplayBlocked(false);
+    } catch (e) {
+      setMusicAutoplayBlocked(true);
+    }
+  }
+
+  function toggleMusicPlayback() {
     const audio = audioRef.current;
     if (!audio) return;
     if (musicPlaying) {
       audio.pause();
       setMusicPlaying(false);
+      setMusicAutoplayBlocked(false);
       return;
     }
-    try {
-      audio.volume = MUSIC_VOLUME;
-      audio.muted = musicMuted;
-      await audio.play();
-      setMusicPlaying(true);
-    } catch (e) {
-      setError((e as Error).message || "Unable to start music playback.");
-    }
+    void enableMusicPlayback();
   }
 
   function toggleMusicMuted() {
@@ -509,7 +631,6 @@ export function App() {
     [adventureId, catalogBoot],
   );
   const selectedAdventure = detail?.tab1.active_adventure ?? (adventureId ? adventureDetailsById[adventureId] ?? null : null);
-  const currentTrack = MUSIC_TRACKS[trackIndex] ?? "";
   const transcriptChars = transcript.reduce((sum, event) => sum + event.text.length + 1, 0);
   const gmMonsters = detail?.gm_monsters ?? [];
   const oppositionState = detail?.session.opposition_state ?? null;
@@ -524,7 +645,56 @@ export function App() {
   const loadingPulse = [".", "..", "..."][chapterLoadingFrame % 3];
   const selectedEncounterMonster = gmMonsters.find((monster) => monster.monster_id === encounterMonsterId) ?? gmMonsters[0] ?? null;
   const encounterMonsterIndex = Math.max(0, gmMonsters.findIndex((monster) => monster.monster_id === encounterMonsterId));
-  const encounterLocationImageUrl = locationImageUrl(encounterLocationTitle);
+  const encounterState = detail?.session.encounter_state;
+  const activeHazardImageUrl =
+    encounterState?.encounter_type === "hazard"
+    && encounterState.status !== "clear"
+    && encounterState.status !== "resolved"
+    && encounterState.location_id
+      ? encounterVisualUrl(encounterState.adventure_id || detail?.tab1.adventure_id || adventureId, encounterState.location_id)
+      : "";
+  const encounterLocationImageUrl = encounterNoticeImageUrl || activeHazardImageUrl || locationImageUrl(encounterLocationTitle);
+  const objectiveState = detail?.session.mission_objective_state;
+  const musicCue: MusicCue = activeOpposition
+    ? "combat"
+    : objectiveState?.complete && Boolean(objectiveState?.returned_to_moosehearth)
+      ? "victory"
+      : tab === 2 && Boolean(detail?.session.current_location_id)
+        ? "adventure"
+        : "inn";
+  const currentMusicTracks = MUSIC_TRACK_URLS[musicCue];
+  const currentTrack = currentMusicTracks[musicTrackIndex % currentMusicTracks.length] ?? currentMusicTracks[0] ?? "";
+
+  useEffect(() => {
+    if (previousMusicCueRef.current === musicCue) return;
+    previousMusicCueRef.current = musicCue;
+    setMusicTrackIndex(0);
+  }, [musicCue]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !currentTrack) return;
+    audio.load();
+    audio.volume = MUSIC_VOLUME;
+    audio.muted = musicMuted;
+    if (!musicPlaying) {
+      audio.pause();
+      return;
+    }
+    void audio.play()
+      .then(() => setMusicAutoplayBlocked(false))
+      .catch(() => {
+        audio.pause();
+        setMusicPlaying(false);
+        setMusicAutoplayBlocked(true);
+      });
+  }, [currentTrack, musicPlaying, musicMuted]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.volume = ttsState === "playing" ? MUSIC_DUCKED_VOLUME : MUSIC_VOLUME;
+  }, [ttsState]);
   const allPlayersDown = Boolean(detail?.tab1.party.length) && detail!.tab1.party.every((member) => member.hp_current <= 0);
   const startRequirements = [
     adventureId === "" ? "select an adventure" : null,
@@ -542,7 +712,21 @@ export function App() {
 
   const headerAdventureTitle = displayAdventureTitle(selectedAdventure ?? selectedAdventureSummary) || "Valaska Adventure Console";
 
-  function stopSpeechPlayback() {
+  function clearTtsQueue() {
+    ttsQueueRef.current = [];
+    ttsQueuedEventIdsRef.current.clear();
+    ttsPreloadControllersRef.current.forEach((controller) => controller.abort());
+    ttsPreloadControllersRef.current.clear();
+    ttsPreloadPromisesRef.current.clear();
+    ttsPreloadObjectUrlsRef.current.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
+    ttsPreloadObjectUrlsRef.current.clear();
+  }
+
+  function stopSpeechPlayback(clearQueue = false) {
+    if (clearQueue) {
+      clearTtsQueue();
+      ttsProcessingRef.current = false;
+    }
     speechAbortRef.current?.abort();
     speechAbortRef.current = null;
     if (speechAudioRef.current) {
@@ -554,6 +738,7 @@ export function App() {
       URL.revokeObjectURL(speechObjectUrlRef.current);
       speechObjectUrlRef.current = null;
     }
+    setCurrentTtsReply(null);
     setTtsState("idle");
   }
 
@@ -562,6 +747,48 @@ export function App() {
     if (!introAudio) return;
     introAudio.pause();
     introAudio.currentTime = 0;
+  }
+
+  function playEncounterNoticeAudio(event: TranscriptEvent) {
+    const payload = event.json_payload ?? {};
+    const locationId = typeof payload.location_id === "string" ? payload.location_id : "";
+    const currentAdventureId = detail?.tab1.adventure_id || adventureId;
+    const audioUrl = encounterNoticeAudioUrl(currentAdventureId, locationId);
+    if (!audioUrl) return;
+    const visualUrl = encounterVisualUrl(currentAdventureId, locationId);
+
+    stopSpeechPlayback(true);
+    stopIntroAudio();
+
+    encounterNoticeAudioRef.current?.pause();
+    const audio = new Audio(audioUrl);
+    audio.preload = "auto";
+    audio.volume = 1;
+    encounterNoticeAudioRef.current = audio;
+    encounterNoticePlayingRef.current = true;
+    setEncounterNoticeImageUrl(visualUrl);
+
+    const finish = () => {
+      audio.removeEventListener("ended", finish);
+      audio.removeEventListener("error", finish);
+      audio.removeEventListener("pause", finish);
+      if (encounterNoticeAudioRef.current === audio) {
+        encounterNoticeAudioRef.current = null;
+        setEncounterNoticeImageUrl("");
+      }
+      encounterNoticePlayingRef.current = false;
+      if (ttsAutoPlay && ttsQueueRef.current.length) {
+        void drainTtsQueue();
+      }
+    };
+
+    audio.addEventListener("ended", finish, { once: true });
+    audio.addEventListener("error", finish, { once: true });
+    audio.addEventListener("pause", finish, { once: true });
+    audio.play().catch((e: Error) => {
+      setTtsError(e.message);
+      finish();
+    });
   }
 
   async function ensureSpeechGainChain() {
@@ -584,28 +811,34 @@ export function App() {
     }
   }
 
-  async function playReply(reply = latestEligibleReply) {
-    if (!reply || !reply.text.trim() || !sessionId) return;
+  function playerNameForReply(reply: TranscriptEvent) {
     const playerName =
       reply.agent_slot === OPPOSITION_SLOT
         ? "Opposition"
         : reply.agent_slot
           ? playerNameBySlot.get(reply.agent_slot) ?? ""
           : "";
-    if (!playerName) return;
+    return playerName;
+  }
 
-    stopSpeechPlayback();
+  function preloadTtsReply(reply: TranscriptEvent) {
+    if (!reply.event_id || !reply.text.trim() || !sessionId) {
+      return Promise.resolve("");
+    }
+    const existing = ttsPreloadPromisesRef.current.get(reply.event_id);
+    if (existing) {
+      return existing;
+    }
+    const playerName = playerNameForReply(reply);
+    if (!playerName) {
+      return Promise.resolve("");
+    }
     const controller = new AbortController();
-    let timedOut = false;
     const timeoutId = window.setTimeout(() => {
-      timedOut = true;
       controller.abort();
     }, TTS_REQUEST_TIMEOUT_MS);
-    speechAbortRef.current = controller;
-    setTtsError("");
-    setTtsState("loading");
-
-    try {
+    ttsPreloadControllersRef.current.set(reply.event_id, controller);
+    const promise = (async () => {
       const blob = await apiBlob(`/session/${sessionId}/tts`, {
         method: "POST",
         body: JSON.stringify({
@@ -614,37 +847,128 @@ export function App() {
         }),
         signal: controller.signal,
       });
-      if (controller.signal.aborted) return;
       const objectUrl = URL.createObjectURL(blob);
-      speechObjectUrlRef.current = objectUrl;
-      if (!speechAudioRef.current) {
-        speechAudioRef.current = new Audio();
+      ttsPreloadObjectUrlsRef.current.add(objectUrl);
+      return objectUrl;
+    })();
+    ttsPreloadPromisesRef.current.set(reply.event_id, promise);
+    promise.catch((e: Error) => {
+      if (e.name !== "AbortError") {
+        setTtsError(e.message);
       }
+      return "";
+    }).finally(() => {
+      window.clearTimeout(timeoutId);
+      ttsPreloadControllersRef.current.delete(reply.event_id);
+    });
+    return promise;
+  }
+
+  async function playPreparedReply(reply: TranscriptEvent, objectUrl: string) {
+    if (!objectUrl) return;
+    ttsPreloadObjectUrlsRef.current.delete(objectUrl);
+    speechObjectUrlRef.current = objectUrl;
+    if (!speechAudioRef.current) {
+      speechAudioRef.current = new Audio();
+    }
+    try {
       await ensureSpeechGainChain();
       if (speechGainNodeRef.current) {
-        speechGainNodeRef.current.gain.value = TTS_PLAYER_GAIN[playerName] ?? 1;
+        speechGainNodeRef.current.gain.value = TTS_PLAYER_GAIN[playerNameForReply(reply)] ?? 1;
       }
       speechAudioRef.current.volume = 1;
       speechAudioRef.current.src = objectUrl;
+      setCurrentTtsReply(reply);
+      const ended = new Promise<void>((resolve) => {
+        const audio = speechAudioRef.current;
+        if (!audio) {
+          resolve();
+          return;
+        }
+        const finish = () => {
+          audio.removeEventListener("ended", finish);
+          audio.removeEventListener("pause", finish);
+          resolve();
+        };
+        audio.addEventListener("ended", finish, { once: true });
+        audio.addEventListener("pause", finish, { once: true });
+      });
       await speechAudioRef.current.play();
       stopIntroAudio();
       setTtsState("playing");
+      await ended;
     } catch (e) {
       if ((e as Error).name === "AbortError") {
         setTtsState("idle");
-        if (timedOut) {
-          setTtsError("Text-to-speech timed out. Please try again.");
-        }
         return;
       }
       setTtsError((e as Error).message);
       setTtsState("idle");
     } finally {
-      window.clearTimeout(timeoutId);
-      if (speechAbortRef.current === controller) {
-        speechAbortRef.current = null;
+      if (reply.event_id) {
+        ttsPreloadPromisesRef.current.delete(reply.event_id);
+      }
+      if (speechObjectUrlRef.current === objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+        speechObjectUrlRef.current = null;
+      }
+      setCurrentTtsReply((current) => (current?.event_id === reply.event_id ? null : current));
+      setTtsState("idle");
+    }
+  }
+
+  async function playReply(reply = latestEligibleReply, interrupt = true) {
+    if (!reply || !reply.text.trim() || !sessionId || !playerNameForReply(reply)) return;
+    if (interrupt) {
+      stopSpeechPlayback(true);
+    }
+    setTtsError("");
+    setTtsState("loading");
+    try {
+      const objectUrl = await preloadTtsReply(reply);
+      await playPreparedReply(reply, objectUrl);
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        setTtsError((e as Error).message);
+      }
+      setTtsState("idle");
+    }
+  }
+
+  async function drainTtsQueue() {
+    if (ttsProcessingRef.current || !ttsAutoPlay || encounterNoticePlayingRef.current) return;
+    ttsProcessingRef.current = true;
+    try {
+      while (ttsAutoPlay && !encounterNoticePlayingRef.current && ttsQueueRef.current.length) {
+        const next = ttsQueueRef.current.shift();
+        if (!next) break;
+        try {
+          setTtsState("loading");
+          const objectUrl = await preloadTtsReply(next);
+          await playPreparedReply(next, objectUrl);
+        } catch (e) {
+          if ((e as Error).name !== "AbortError") {
+            setTtsError((e as Error).message);
+          }
+        }
+      }
+    } finally {
+      ttsProcessingRef.current = false;
+      if (ttsAutoPlay && !encounterNoticePlayingRef.current && ttsQueueRef.current.length) {
+        void drainTtsQueue();
       }
     }
+  }
+
+  function enqueueTtsReplies(replies: TranscriptEvent[]) {
+    replies.forEach((reply) => {
+      if (!reply.event_id || ttsQueuedEventIdsRef.current.has(reply.event_id)) return;
+      if (ttsQueueRef.current.length >= TTS_QUEUE_LIMIT) return;
+      ttsQueuedEventIdsRef.current.add(reply.event_id);
+      ttsQueueRef.current.push(reply);
+      void preloadTtsReply(reply);
+    });
+    void drainTtsQueue();
   }
 
   useEffect(() => {
@@ -655,26 +979,28 @@ export function App() {
     }
     if (autoPlayBaselineRef.current === null) {
       autoPlayBaselineRef.current = latestEligibleReply.event_id;
-      if (ttsState !== "idle") {
-        return;
-      }
-      void playReply(latestEligibleReply);
+      enqueueTtsReplies([latestEligibleReply]);
       return;
     }
-    if (latestEligibleReply.event_id === autoPlayBaselineRef.current) {
+    const baselineIndex = transcript.findIndex((event) => event.event_id === autoPlayBaselineRef.current);
+    const newReplies = transcript
+      .slice(baselineIndex >= 0 ? baselineIndex + 1 : 0)
+      .filter((event) => event.role === "agent" && event.text.trim())
+      .slice(0, 2);
+    if (!newReplies.length) {
       return;
     }
     autoPlayBaselineRef.current = latestEligibleReply.event_id;
-    if (ttsState !== "idle") {
-      return;
-    }
-    void playReply(latestEligibleReply);
-  }, [latestEligibleReply?.event_id, ttsAutoPlay, ttsState]);
+    enqueueTtsReplies(newReplies);
+  }, [latestEligibleReply?.event_id, transcript.length, ttsAutoPlay]);
 
   function toggleTtsAutoPlay() {
     setTtsAutoPlay((current) => {
       const next = !current;
       autoPlayBaselineRef.current = latestEligibleReply?.event_id ?? null;
+      if (!next) {
+        stopSpeechPlayback(true);
+      }
       return next;
     });
   }
@@ -801,6 +1127,16 @@ export function App() {
         });
       } else {
         setPromptNarrationPending(false);
+      }
+      if (response.followup_pending) {
+        void waitForPartyFollowups(
+          response.user_event.prompt_index,
+          response.agent_event?.event_id ?? null,
+          response.followup_expected_agent_events ?? 0,
+          sessionId,
+        ).catch((pollError: Error) => {
+          setError(pollError.message);
+        });
       }
     } catch (e) {
       setError((e as Error).message);
@@ -1129,8 +1465,9 @@ export function App() {
         key={currentTrack}
         preload="metadata"
         src={currentTrack}
+        loop={currentMusicTracks.length === 1}
         onError={() => setError(`Unable to load music track: ${currentTrack}`)}
-        onEnded={() => setTrackIndex((current) => (current + 1) % MUSIC_TRACKS.length)}
+        onEnded={() => setMusicTrackIndex((current) => (current + 1) % currentMusicTracks.length)}
       >
         <source src={currentTrack} type="audio/mpeg" />
       </audio>
@@ -1144,10 +1481,10 @@ export function App() {
         <div className="status-strip status-strip--compact">
           <div className="status-card">
             <span>Music</span>
-            <strong>{musicPlaying ? "Playing" : "Paused"}</strong>
+            <strong>{musicAutoplayBlocked ? "Enable Music" : `${musicPlaying ? "Playing" : "Paused"} - ${MUSIC_CUE_LABELS[musicCue]}`}</strong>
             <div className="music-controls">
               <button className="btn music-btn" type="button" onClick={() => void toggleMusicPlayback()}>
-                {musicPlaying ? "Pause" : "Play"}
+                {musicAutoplayBlocked ? "Enable Music" : musicPlaying ? "Pause" : "Play"}
               </button>
               <button className="btn music-btn" type="button" onClick={toggleMusicMuted}>
                 {musicMuted ? "Unmute" : "Mute"}
@@ -1213,6 +1550,7 @@ export function App() {
             transcriptChars={transcriptChars}
             transcriptRef={transcriptRef}
             latestEligibleReply={latestEligibleReply}
+            currentTtsReply={currentTtsReply}
             ttsState={ttsState}
             ttsAutoPlay={ttsAutoPlay}
             ttsStatusLabels={TTS_STATUS_LABELS}

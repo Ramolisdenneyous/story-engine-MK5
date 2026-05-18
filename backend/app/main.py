@@ -12,6 +12,7 @@ from .schemas import (
     AdventureOut,
     CatalogBootResponse,
     CatalogResponse,
+    CelebrationSongResponse,
     CombatStateOut,
     ClassCatalogSummaryOut,
     DiceBatchRequest,
@@ -49,6 +50,7 @@ from .services import (
     end_chapter,
     finalize_prompt_narration,
     generate_scene_image,
+    generate_celebration_song,
     get_session_detail,
     lock_tab1,
     normalize_combat_state_for_output,
@@ -439,6 +441,14 @@ def generate_image_endpoint(session_id: str, db: Session = Depends(get_db)):
     try:
         data = generate_scene_image(db, session_id)
         return ImageGenerateResponse(image_url=data["image_url"], prompt_text=data["prompt_text"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/session/{session_id}/celebration-song", response_model=CelebrationSongResponse)
+def celebration_song_endpoint(session_id: str, db: Session = Depends(get_db)):
+    try:
+        return CelebrationSongResponse(**generate_celebration_song(db, session_id))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

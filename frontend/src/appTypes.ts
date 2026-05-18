@@ -103,7 +103,17 @@ export type MissionObjectiveState = {
   target_kills?: number;
   gold_collected?: number;
   target_gold?: number;
+  celebration_song?: CelebrationSongResponse;
   updates?: Array<{ prompt_index: number; text: string }>;
+};
+
+export type CelebrationSongResponse = {
+  status: string;
+  lyrics: string;
+  prompt_text: string;
+  audio_url: string;
+  file_name: string;
+  error: string;
 };
 
 export type EncounterState = {

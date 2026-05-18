@@ -17,9 +17,12 @@ class Settings(BaseSettings):
     llm_model_summary: str = "gpt-4o-mini"
     llm_model_narrative: str = "gpt-4o"
     llm_model_tts: str = "gpt-4o-mini-tts"
+    llm_model_celebration: str = "gpt-5.5"
     llm_external_enabled: bool = False
     openai_api_key: str = ""
     openai_base_url: str = "https://api.openai.com/v1"
+    elevenlabs_api_key: str = ""
+    elevenlabs_base_url: str = "https://api.elevenlabs.io/v1"
     chunk_size_prompts: int = 7
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

@@ -23,6 +23,9 @@ services:
       LLM_MODEL_CHARACTER: ${LLM_MODEL_CHARACTER:-gpt-4o-mini}
       LLM_MODEL_SUMMARY: ${LLM_MODEL_SUMMARY:-gpt-4o-mini}
       LLM_MODEL_NARRATIVE: ${LLM_MODEL_NARRATIVE:-gpt-4o}
+      LLM_MODEL_CELEBRATION: ${LLM_MODEL_CELEBRATION:-gpt-5.5}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_BASE_URL: ${ELEVENLABS_BASE_URL:-https://api.elevenlabs.io/v1}
     ports:
       - "8002:8000"
     depends_on:

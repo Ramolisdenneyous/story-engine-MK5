@@ -38,6 +38,7 @@ DICE_RE = re.compile(r"^\s*(\d{1,3})\s*d\s*(4|6|8|10|12|20|100)\s*([+-]\s*\d+)?\
 VALID_DICE_SIDES = {4, 6, 8, 10, 12, 20, 100}
 SLOT_COLORS = {1: "red", 2: "orange", 3: "yellow", 4: "green"}
 ASSET_DIR = Path("/app/docs/images")
+AUDIO_DIR = Path("/app/docs/audio")
 OPPOSITION_AGENT_SLOT = 12
 OPPOSITION_INITIATIVE_ID = "opp:12"
 OPPOSITION_DISPLAY_NAME = "Opposition"
@@ -922,6 +923,19 @@ def _default_generated_image() -> dict:
         "prompt_text": "",
         "last_actor_slot": None,
     }
+
+
+def _safe_file_stem(value: str) -> str:
+    stem = re.sub(r"[^a-zA-Z0-9._-]+", "-", value.strip()).strip("-._")
+    return stem or "celebration-song"
+
+
+def _strip_code_fences(text: str) -> str:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned.strip()
 
 
 def asset_url(filename: str) -> str:
@@ -5077,6 +5091,154 @@ def generate_scene_image(db: Session, session_id: str) -> dict:
     )
     db.commit()
     return session.generated_image
+
+
+def _celebration_context(db: Session, session: SessionModel) -> dict:
+    tab1 = get_tab1_or_create(db, session.session_id)
+    adventure = ADVENTURES.get(tab1.adventure_id, {})
+    party_state = derive_party_state(db, session.session_id)
+    party = []
+    for slot in range(1, 5):
+        player_id = _player_for_slot(tab1, slot)
+        class_id = _class_assignment_for_slot(tab1, slot)
+        if not player_id or not class_id:
+            continue
+        state = party_state.get(str(slot), {})
+        party.append(
+            {
+                "slot": slot,
+                "name": PLAYERS[player_id]["name"],
+                "class": class_id,
+                "hp": f"{state.get('hp_current', 0)}/{CLASSES[class_id]['hp_max']}",
+                "notable_inventory": state.get("inventory", []),
+            }
+        )
+    return {
+        "adventure_title": adventure.get("title", tab1.adventure_id),
+        "adventure_id": tab1.adventure_id,
+        "party": party,
+        "objective": copy.deepcopy(session.mission_objective_state or {}),
+        "current_location": session.current_location_name,
+        "recent_log": [
+            {
+                "role": event.role.value,
+                "kind": event.kind.value,
+                "agent_slot": event.agent_slot,
+                "agent_name": session.agent_names.get(str(event.agent_slot), "") if event.agent_slot else "",
+                "text": event.text,
+            }
+            for event in _recent_events(db, session)
+            if event.text
+        ],
+    }
+
+
+def _build_celebration_lyrics(db: Session, session: SessionModel) -> str:
+    provider = get_provider()
+    payload = {
+        "task": "Write original lyrics for a one-minute heroic tavern-ballad celebrating this tabletop RPG party's completed adventure.",
+        "style_target": (
+            "Heroic fantasy tavern ballad, witty bardic chorus, catchy coin-and-glory energy, "
+            "lute/drum friendly. Do not quote or imitate any copyrighted song lyrics. "
+            "Do not mention any real-world song title in the lyrics."
+        ),
+        "structure": "Return only lyrics. Use [Verse], [Chorus], and [Outro] section labels. Keep it singable in about 60 seconds.",
+        "session_context": _celebration_context(db, session),
+    }
+    try:
+        lyrics = provider.generate("agent13", settings.llm_model_celebration, payload)
+        log_artifact(db, session.session_id, "agent13", settings.llm_model_celebration, payload, lyrics, provider.provider_name)
+    except Exception:
+        logger.exception("Celebration lyric generation failed with model=%s; falling back to summary model", settings.llm_model_celebration)
+        lyrics = provider.generate("agent13", settings.llm_model_summary, payload)
+        log_artifact(db, session.session_id, "agent13", settings.llm_model_summary, payload, lyrics, provider.provider_name)
+    cleaned = _strip_code_fences(lyrics)
+    return cleaned or "[Chorus]\nRaise a cup for the road behind,\nFor brave hearts weathered by frost and fire.\nMoosehearth sings what the wilds remind:\nHeroes return, and the night climbs higher."
+
+
+def _build_celebration_music_prompt(session: SessionModel, lyrics: str) -> str:
+    objective = session.mission_objective_state or {}
+    title = objective.get("title", "A Valaska Victory")
+    return (
+        f"Song title: {title} Celebration.\n\n"
+        "Style and arrangement: original heroic dark-fantasy tavern ballad, clear lead vocals, rowdy but warm inn chorus, "
+        "lute, hand drum, low strings, clapping pulse, bardic storytelling energy, catchy refrain, triumphant ending. "
+        "Avoid modern pop production and avoid copying any existing song.\n\n"
+        "Use these lyrics clearly and in order:\n\n"
+        f"{lyrics}\n\n"
+        "Additional direction: This is the ending celebration at the Antlers' Rest Inn in Moosehearth after the party returns victorious. "
+        "Make it feel like a bard is singing to the room about the party's deeds."
+    )
+
+
+def _compose_elevenlabs_music(prompt_text: str, session_id: str) -> tuple[str, str]:
+    if not settings.elevenlabs_api_key:
+        raise RuntimeError("ELEVENLABS_API_KEY is not configured for the backend container.")
+    output_dir = AUDIO_DIR / "celebrations"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    file_name = f"{_safe_file_stem(session_id)}-{int(time.time())}.mp3"
+    output_path = output_dir / file_name
+    started_at = time.perf_counter()
+    with httpx.Client(timeout=240.0) as client:
+        response = client.post(
+            f"{settings.elevenlabs_base_url.rstrip('/')}/music",
+            headers={
+                "xi-api-key": settings.elevenlabs_api_key,
+                "Content-Type": "application/json",
+            },
+            params={"output_format": "mp3_44100_128"},
+            json={
+                "prompt": prompt_text[:4100],
+                "music_length_ms": 60000,
+                "force_instrumental": False,
+                "model_id": "music_v1",
+            },
+        )
+        response.raise_for_status()
+    output_path.write_bytes(response.content)
+    logger.info(
+        "Celebration song generated in %.2fs session_id=%s bytes=%s",
+        time.perf_counter() - started_at,
+        session_id,
+        len(response.content),
+    )
+    return f"/audio/celebrations/{file_name}", file_name
+
+
+def generate_celebration_song(db: Session, session_id: str) -> dict:
+    session = get_session_or_404(db, session_id)
+    objective = session.mission_objective_state or {}
+    if not objective.get("complete") or not objective.get("returned_to_moosehearth"):
+        raise ValueError("Celebration songs unlock after the objective is complete and the party returns to Moosehearth.")
+    lyrics = _build_celebration_lyrics(db, session)
+    prompt_text = _build_celebration_music_prompt(session, lyrics)
+    result = {
+        "status": "lyrics_only",
+        "lyrics": lyrics,
+        "prompt_text": prompt_text,
+        "audio_url": "",
+        "file_name": "",
+        "error": "",
+    }
+    try:
+        audio_url, file_name = _compose_elevenlabs_music(prompt_text, session_id)
+        result.update({"status": "complete", "audio_url": audio_url, "file_name": file_name})
+    except Exception as exc:
+        logger.exception("Celebration song audio generation failed for session_id=%s", session_id)
+        result["error"] = str(exc)
+    objective_state = copy.deepcopy(objective)
+    objective_state["celebration_song"] = copy.deepcopy(result)
+    session.mission_objective_state = objective_state
+    _append_system_event(
+        db,
+        session_id,
+        session.prompt_index,
+        EventKind.TRANSCRIPT,
+        "The bard prepares a celebration song for the party.",
+        {"source": "celebration_song", "status": result["status"], "audio_url": result["audio_url"], "error": result["error"]},
+    )
+    db.commit()
+    return result
 
 
 def synthesize_player_reply_tts(db: Session, session_id: str, text: str, player_name: str) -> bytes:

@@ -289,6 +289,15 @@ class TTSRequest(BaseModel):
     player_name: str
 
 
+class CelebrationSongResponse(BaseModel):
+    status: str
+    lyrics: str
+    prompt_text: str
+    audio_url: str = ""
+    file_name: str = ""
+    error: str = ""
+
+
 class ImageStateOut(BaseModel):
     image_url: str
     prompt_text: str

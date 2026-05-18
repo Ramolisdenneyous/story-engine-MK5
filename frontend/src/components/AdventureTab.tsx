@@ -2,6 +2,7 @@ import { FormEvent, RefObject } from "react";
 import {
   Adventure,
   AdventureLocation,
+  CelebrationSongResponse,
   Monster,
   OppositionState,
   SessionDetail,
@@ -40,6 +41,8 @@ type AdventureTabProps = {
   selectedEncounterMonster: Monster | null;
   loading: boolean;
   longRestLoading: boolean;
+  celebrationLoading: boolean;
+  celebrationSong: CelebrationSongResponse | null;
   travelLoading: boolean;
   allPlayersDown: boolean;
   worldMapImageUrl: string;
@@ -72,6 +75,7 @@ type AdventureTabProps = {
   onCycleEncounterMonster: (direction: "previous" | "next") => void;
   onSetEncounterQuantity: (quantity: number) => void;
   onTriggerEncounter: () => void;
+  onGenerateCelebrationSong: () => void;
   onFleeEncounter: () => void;
   onSearchLocation: () => void;
   onUseItem: (itemName: string, targetId?: string) => void;
@@ -130,6 +134,8 @@ export function AdventureTab(props: AdventureTabProps) {
         loading={props.loading}
         animationLocked={props.animationLocked}
         longRestLoading={props.longRestLoading}
+        celebrationLoading={props.celebrationLoading}
+        celebrationSong={props.celebrationSong}
         encounterModalOpen={props.encounterModalOpen}
         encounterMonsterId={props.encounterMonsterId}
         encounterMonsterIndex={props.encounterMonsterIndex}
@@ -150,6 +156,7 @@ export function AdventureTab(props: AdventureTabProps) {
         onCycleEncounterMonster={props.onCycleEncounterMonster}
         onSetEncounterQuantity={props.onSetEncounterQuantity}
         onTriggerEncounter={props.onTriggerEncounter}
+        onGenerateCelebrationSong={props.onGenerateCelebrationSong}
         onFleeEncounter={props.onFleeEncounter}
         onSearchLocation={props.onSearchLocation}
         onUseItem={props.onUseItem}

@@ -4,6 +4,7 @@ import {
   Adventure,
   AdventureSummary,
   CatalogBoot,
+  CelebrationSongResponse,
   FeedbackCreateResponse,
   Monster,
   OPPOSITION_SLOT,
@@ -62,6 +63,14 @@ const ENCOUNTER_VISUALS: Record<string, string> = {
   "old-people-barrow:loc-1": "Encounter-The Frost-Cleft Entrance-TRAP.webp",
   "old-people-barrow:loc-6": "Encounter-The Fractured Escape Tunnel-Hazard.webp",
   "endless-glacier-undead:loc-1": "Encounter-Everflame Abbey-NPC.webp",
+};
+const VICTORY_SONGS: Record<string, { fileName: string; title: string }> = {
+  "icebane-castle": { fileName: "icebane-castle-victory.mp3", title: "The Crown Beneath the Frost" },
+  "east-marsh-raid": { fileName: "east-marsh-raid-victory.mp3", title: "Before the Dawn" },
+  "telas-wagons": { fileName: "telas-wagons-victory.mp3", title: "Hold the King's Way" },
+  "old-people-barrow": { fileName: "old-people-barrow-victory.mp3", title: "The Dead Remember" },
+  "collecting-taxes": { fileName: "collecting-taxes-victory.mp3", title: "Four Hundred on the King's Road" },
+  "endless-glacier-undead": { fileName: "endless-glacier-undead-victory.mp3", title: "Lay Them Down in Ice" },
 };
 
 const ADVENTURE_TITLE_OVERRIDES: Record<string, string> = {
@@ -242,6 +251,19 @@ function encounterVisualUrl(adventureId: string, locationId: string) {
   return fileName ? `/assets/${fileName}` : "";
 }
 
+function victorySongForAdventure(adventureId: string): CelebrationSongResponse | null {
+  const song = VICTORY_SONGS[adventureId];
+  if (!song) return null;
+  return {
+    status: "complete",
+    lyrics: "",
+    prompt_text: song.title,
+    audio_url: `/audio/victory-songs/${song.fileName}`,
+    file_name: song.fileName,
+    error: "",
+  };
+}
+
 function isEncounterNoticeEvent(event: TranscriptEvent) {
   const payload = event.json_payload ?? {};
   const source = typeof payload.source === "string" ? payload.source : "";
@@ -271,6 +293,8 @@ export function App() {
   const ttsPreloadControllersRef = useRef<Map<string, AbortController>>(new Map());
   const ttsPreloadObjectUrlsRef = useRef<Set<string>>(new Set());
   const ttsProcessingRef = useRef(false);
+  const ttsAutoPlayRef = useRef(true);
+  const ttsQueueRunRef = useRef(0);
   const narrationPollTokenRef = useRef(0);
   const partyFollowupPollTokenRef = useRef(0);
   const previousMusicCueRef = useRef<MusicCue>("inn");
@@ -303,6 +327,8 @@ export function App() {
   const [ttsError, setTtsError] = useState("");
   const [currentTtsReply, setCurrentTtsReply] = useState<TranscriptEvent | null>(null);
   const [encounterNoticeImageUrl, setEncounterNoticeImageUrl] = useState("");
+  const [celebrationSong, setCelebrationSong] = useState<CelebrationSongResponse | null>(null);
+  const [celebrationLoading, setCelebrationLoading] = useState(false);
   const [travelLoading, setTravelLoading] = useState(false);
   const [longRestLoading, setLongRestLoading] = useState(false);
   const [encounterModalOpen, setEncounterModalOpen] = useState(false);
@@ -538,6 +564,8 @@ export function App() {
     encounterNoticeAudioRef.current = null;
     encounterNoticePlayingRef.current = false;
     setEncounterNoticeImageUrl("");
+    setCelebrationSong(null);
+    setCelebrationLoading(false);
     encounterNoticeBaselineReadyRef.current = false;
     playedEncounterNoticeEventIdsRef.current.clear();
   }, [sessionId]);
@@ -580,6 +608,10 @@ export function App() {
       window.clearTimeout(settleTimerId);
     };
   }, [splashOpen, tab]);
+
+  useEffect(() => {
+    ttsAutoPlayRef.current = ttsAutoPlay;
+  }, [ttsAutoPlay]);
 
   useEffect(() => {
     if (tab !== 2 || splashOpen || introAudioPlayed || !detail?.session.tab1_locked) return;
@@ -664,6 +696,7 @@ export function App() {
         : "inn";
   const currentMusicTracks = MUSIC_TRACK_URLS[musicCue];
   const currentTrack = currentMusicTracks[musicTrackIndex % currentMusicTracks.length] ?? currentMusicTracks[0] ?? "";
+  const activeCelebrationSong = celebrationSong ?? objectiveState?.celebration_song ?? null;
 
   useEffect(() => {
     if (previousMusicCueRef.current === musicCue) return;
@@ -724,6 +757,7 @@ export function App() {
 
   function stopSpeechPlayback(clearQueue = false) {
     if (clearQueue) {
+      ttsQueueRunRef.current += 1;
       clearTtsQueue();
       ttsProcessingRef.current = false;
     }
@@ -777,7 +811,7 @@ export function App() {
         setEncounterNoticeImageUrl("");
       }
       encounterNoticePlayingRef.current = false;
-      if (ttsAutoPlay && ttsQueueRef.current.length) {
+      if (ttsAutoPlayRef.current && ttsQueueRef.current.length) {
         void drainTtsQueue();
       }
     };
@@ -839,33 +873,37 @@ export function App() {
     }, TTS_REQUEST_TIMEOUT_MS);
     ttsPreloadControllersRef.current.set(reply.event_id, controller);
     const promise = (async () => {
-      const blob = await apiBlob(`/session/${sessionId}/tts`, {
-        method: "POST",
-        body: JSON.stringify({
-          text: reply.text,
-          player_name: playerName,
-        }),
-        signal: controller.signal,
-      });
-      const objectUrl = URL.createObjectURL(blob);
-      ttsPreloadObjectUrlsRef.current.add(objectUrl);
-      return objectUrl;
+      try {
+        const blob = await apiBlob(`/session/${sessionId}/tts`, {
+          method: "POST",
+          body: JSON.stringify({
+            text: reply.text,
+            player_name: playerName,
+          }),
+          signal: controller.signal,
+        });
+        const objectUrl = URL.createObjectURL(blob);
+        ttsPreloadObjectUrlsRef.current.add(objectUrl);
+        return objectUrl;
+      } catch (e) {
+        if ((e as Error).name !== "AbortError") {
+          setTtsError((e as Error).message);
+        }
+        return "";
+      } finally {
+        window.clearTimeout(timeoutId);
+        ttsPreloadControllersRef.current.delete(reply.event_id);
+      }
     })();
     ttsPreloadPromisesRef.current.set(reply.event_id, promise);
-    promise.catch((e: Error) => {
-      if (e.name !== "AbortError") {
-        setTtsError(e.message);
-      }
-      return "";
-    }).finally(() => {
-      window.clearTimeout(timeoutId);
-      ttsPreloadControllersRef.current.delete(reply.event_id);
-    });
     return promise;
   }
 
   async function playPreparedReply(reply: TranscriptEvent, objectUrl: string) {
-    if (!objectUrl) return;
+    if (!objectUrl) {
+      setTtsState("idle");
+      return;
+    }
     ttsPreloadObjectUrlsRef.current.delete(objectUrl);
     speechObjectUrlRef.current = objectUrl;
     if (!speechAudioRef.current) {
@@ -936,31 +974,42 @@ export function App() {
   }
 
   async function drainTtsQueue() {
-    if (ttsProcessingRef.current || !ttsAutoPlay || encounterNoticePlayingRef.current) return;
+    if (ttsProcessingRef.current || !ttsAutoPlayRef.current || encounterNoticePlayingRef.current) return;
+    const runToken = ttsQueueRunRef.current;
     ttsProcessingRef.current = true;
     try {
-      while (ttsAutoPlay && !encounterNoticePlayingRef.current && ttsQueueRef.current.length) {
+      while (ttsAutoPlayRef.current && runToken === ttsQueueRunRef.current && !encounterNoticePlayingRef.current && ttsQueueRef.current.length) {
         const next = ttsQueueRef.current.shift();
         if (!next) break;
         try {
           setTtsState("loading");
           const objectUrl = await preloadTtsReply(next);
+          if (!ttsAutoPlayRef.current || runToken !== ttsQueueRunRef.current || encounterNoticePlayingRef.current) {
+            if (objectUrl) {
+              ttsPreloadObjectUrlsRef.current.delete(objectUrl);
+              URL.revokeObjectURL(objectUrl);
+            }
+            setTtsState("idle");
+            break;
+          }
           await playPreparedReply(next, objectUrl);
         } catch (e) {
           if ((e as Error).name !== "AbortError") {
             setTtsError((e as Error).message);
           }
+          setTtsState("idle");
         }
       }
     } finally {
       ttsProcessingRef.current = false;
-      if (ttsAutoPlay && !encounterNoticePlayingRef.current && ttsQueueRef.current.length) {
+      if (ttsAutoPlayRef.current && !encounterNoticePlayingRef.current && ttsQueueRef.current.length) {
         void drainTtsQueue();
       }
     }
   }
 
   function enqueueTtsReplies(replies: TranscriptEvent[]) {
+    if (!ttsAutoPlayRef.current) return;
     replies.forEach((reply) => {
       if (!reply.event_id || ttsQueuedEventIdsRef.current.has(reply.event_id)) return;
       if (ttsQueueRef.current.length >= TTS_QUEUE_LIMIT) return;
@@ -997,9 +1046,12 @@ export function App() {
   function toggleTtsAutoPlay() {
     setTtsAutoPlay((current) => {
       const next = !current;
+      ttsAutoPlayRef.current = next;
       autoPlayBaselineRef.current = latestEligibleReply?.event_id ?? null;
       if (!next) {
         stopSpeechPlayback(true);
+      } else if (ttsQueueRef.current.length) {
+        void drainTtsQueue();
       }
       return next;
     });
@@ -1258,6 +1310,28 @@ export function App() {
     } finally {
       setTravelLoading(false);
     }
+  }
+
+  async function generateCelebrationSong() {
+    const song = victorySongForAdventure(detail?.tab1.adventure_id || adventureId);
+    if (!song) {
+      setError("No canned victory song is configured for this adventure.");
+      return;
+    }
+    const backgroundAudio = audioRef.current;
+    if (backgroundAudio) {
+      backgroundAudio.pause();
+      backgroundAudio.currentTime = 0;
+    }
+    setMusicPlaying(false);
+    setMusicAutoplayBlocked(false);
+    setError("");
+    setCelebrationLoading(true);
+    setCelebrationSong(null);
+    window.setTimeout(() => {
+      setCelebrationSong(song);
+      setCelebrationLoading(false);
+    }, 0);
   }
 
   function cycleEncounterMonster(direction: "previous" | "next") {
@@ -1569,6 +1643,8 @@ export function App() {
             selectedEncounterMonster={selectedEncounterMonster}
             loading={loading || spawnLoading || dismissLoading || promptNarrationPending}
             longRestLoading={longRestLoading}
+            celebrationLoading={celebrationLoading}
+            celebrationSong={activeCelebrationSong}
             travelLoading={travelLoading}
             allPlayersDown={allPlayersDown}
             worldMapImageUrl={catalogBoot.map_image_url}
@@ -1611,6 +1687,7 @@ export function App() {
             onCycleEncounterMonster={cycleEncounterMonster}
             onSetEncounterQuantity={setEncounterQuantity}
             onTriggerEncounter={() => void triggerEncounter()}
+            onGenerateCelebrationSong={() => void generateCelebrationSong()}
             onFleeEncounter={() => void fleeEncounter()}
             onSearchLocation={() => void searchLocation()}
             onUseItem={(itemName, targetId) => void useSelectedItem(itemName, targetId)}

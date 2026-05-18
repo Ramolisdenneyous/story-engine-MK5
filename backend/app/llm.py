@@ -160,6 +160,8 @@ class MockLLMProvider(LLMProvider):
             return f"Turn delta summary for prompts {payload.get('from_prompt_index')}-{payload.get('to_prompt_index')}."
         if agent_id == "agent9":
             return "Narrative draft generated from the selected player lens, structured memory, and transcript."
+        if agent_id == "agent13":
+            return "[Verse]\nThe party came home through the frost and the flame,\nWith hard-won scars and a tale to proclaim.\n\n[Chorus]\nRaise up the cup, let Moosehearth sing,\nFor brave hearts return with the dawn on their wings.\n\n[Outro]\nSo pay the bard and remember the night,\nWhen Valaska's heroes came back from the fight."
         if agent_id == "agent10":
             party = payload.get("recent_context", [])
             moment = party[-1]["text"] if party else "the party presses into the cold Valaskan dusk"
@@ -510,6 +512,12 @@ class OpenAIProvider(LLMProvider):
             return (
                 f"{NARRATIVE_BASE_PROMPT}\n\nSelected player lens:\n{PLAYER_NARRATIVE_LENSES[selected_player_id]}"
             )
+        if agent_id == "agent13":
+            return (
+                "You are a bardic lyricist for Story Engine MK5. Write original, singable fantasy tavern-ballad lyrics "
+                "from the provided completed adventure context. Do not quote or closely imitate any existing song. "
+                "Return only lyrics with simple section labels."
+            )
         if agent_id == "agent10":
             return IMAGE_SYSTEM_PROMPT
         if agent_id == "agent12":
@@ -517,7 +525,7 @@ class OpenAIProvider(LLMProvider):
         return CHARACTER_SYSTEM_PROMPT
 
     def _messages(self, agent_id: str, payload: dict) -> list[dict[str, Any]]:
-        if agent_id in {"agent0", "agent8", "agent10", "agent12"}:
+        if agent_id in {"agent0", "agent8", "agent10", "agent12", "agent13"}:
             return [{"role": "user", "content": json.dumps(payload, ensure_ascii=True)}]
         if agent_id == "agent9":
             return [{"role": "user", "content": json.dumps(payload, ensure_ascii=True)}]

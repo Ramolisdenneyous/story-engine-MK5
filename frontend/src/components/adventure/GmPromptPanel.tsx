@@ -1,6 +1,6 @@
 import { FormEvent } from "react";
 import { resolveApiUrl } from "../../api";
-import { Monster, OPPOSITION_SLOT, OppositionState, SessionDetail, SLOT_COLORS } from "../../appTypes";
+import { CelebrationSongResponse, Monster, OPPOSITION_SLOT, OppositionState, SessionDetail, SLOT_COLORS } from "../../appTypes";
 
 type OnboardingGuideStep = "starter" | "adventure-map" | "location-one" | "travel" | "trigger-encounter" | "start-encounter" | "opposition-prompt" | "complete";
 
@@ -12,6 +12,8 @@ type GmPromptPanelProps = {
   loading: boolean;
   animationLocked: boolean;
   longRestLoading: boolean;
+  celebrationLoading: boolean;
+  celebrationSong: CelebrationSongResponse | null;
   encounterModalOpen: boolean;
   encounterMonsterId: string;
   encounterMonsterIndex: number;
@@ -32,6 +34,7 @@ type GmPromptPanelProps = {
   onCycleEncounterMonster: (direction: "previous" | "next") => void;
   onSetEncounterQuantity: (quantity: number) => void;
   onTriggerEncounter: () => void;
+  onGenerateCelebrationSong: () => void;
   onFleeEncounter: () => void;
   onSearchLocation: () => void;
   onUseItem: (itemName: string, targetId?: string) => void;
@@ -81,6 +84,8 @@ export function GmPromptPanel({
   loading,
   animationLocked,
   longRestLoading,
+  celebrationLoading,
+  celebrationSong,
   encounterModalOpen,
   encounterMonsterId,
   encounterMonsterIndex,
@@ -101,6 +106,7 @@ export function GmPromptPanel({
   onCycleEncounterMonster,
   onSetEncounterQuantity,
   onTriggerEncounter,
+  onGenerateCelebrationSong,
   onFleeEncounter,
   onSearchLocation,
   onUseItem,
@@ -125,6 +131,7 @@ export function GmPromptPanel({
     && selectedAgentHasCombatTurn
     && (activeAgentSlot !== OPPOSITION_SLOT || Boolean(activeOpposition?.active));
   const encounterButtonLabel = activeOpposition?.active ? "Flee Encounter" : "Trigger Encounter";
+  const celebrationUnlocked = Boolean(detail.session.mission_objective_state.complete && detail.session.mission_objective_state.returned_to_moosehearth && !activeOpposition?.active);
   const showStarterPrompt = Boolean(starterPromptText && canPrompt && !userPrompt.trim() && !loading);
   const triggerEncounterGuideActive = onboardingGuideStep === "trigger-encounter" && !activeOpposition?.active;
   const startEncounterGuideActive = onboardingGuideStep === "start-encounter";
@@ -243,18 +250,29 @@ export function GmPromptPanel({
           </details>
           <div className="action-row">
             <button className="btn" type="submit" disabled={loading || !canPrompt}>Send Prompt</button>
-            <button
-              className={[
-                activeOpposition?.active ? "btn danger" : "btn accent",
-                triggerEncounterGuideActive ? "onboarding-guide-pulse" : "",
-              ].filter(Boolean).join(" ")}
-              type="button"
-              onClick={activeOpposition?.active ? onFleeEncounter : onOpenEncounterModal}
-              disabled={loading || animationLocked || Boolean(activeOpposition?.flee_failed) || (!activeOpposition?.active && gmMonsters.length === 0)}
-              title={activeOpposition?.flee_failed ? "Flee has already failed for this combat." : ""}
-            >
-              {encounterButtonLabel}
-            </button>
+            {celebrationUnlocked && !activeOpposition?.active ? (
+              <button
+                className="btn accent"
+                type="button"
+                onClick={onGenerateCelebrationSong}
+                disabled={loading || animationLocked || celebrationLoading}
+              >
+                {celebrationLoading ? "Paying..." : "Pay the Bard!"}
+              </button>
+            ) : (
+              <button
+                className={[
+                  activeOpposition?.active ? "btn danger" : "btn accent",
+                  triggerEncounterGuideActive ? "onboarding-guide-pulse" : "",
+                ].filter(Boolean).join(" ")}
+                type="button"
+                onClick={activeOpposition?.active ? onFleeEncounter : onOpenEncounterModal}
+                disabled={loading || animationLocked || Boolean(activeOpposition?.flee_failed) || (!activeOpposition?.active && gmMonsters.length === 0)}
+                title={activeOpposition?.flee_failed ? "Flee has already failed for this combat." : ""}
+              >
+                {encounterButtonLabel}
+              </button>
+            )}
             <button
               className="btn accent"
               type="button"
@@ -291,6 +309,30 @@ export function GmPromptPanel({
             <button className="btn" type="button" onClick={onEndChapter} disabled={loading || animationLocked || detail.session.state !== "ACTIVE"}>End Chapter</button>
           </div>
         </form>
+        {celebrationSong && (
+          <div className="celebration-panel">
+            <div className="encounter-status-strip">
+              <strong>Bard Song</strong>
+              <span>{celebrationSong.status === "complete" ? "Generated" : "Lyrics ready"}</span>
+            </div>
+            {celebrationSong.audio_url ? (
+              <>
+                <audio className="celebration-audio" src={resolveApiUrl(celebrationSong.audio_url)} controls autoPlay />
+                <a className="btn btn-small accent" href={resolveApiUrl(celebrationSong.audio_url)} download={celebrationSong.file_name || "mk5-celebration-song.mp3"}>
+                  Download Song
+                </a>
+              </>
+            ) : (
+              <p className="inline-guidance">{celebrationSong.error ? `Song audio failed: ${celebrationSong.error}` : "Song audio has not been generated yet."}</p>
+            )}
+            {celebrationSong.lyrics.trim() && (
+              <details className="mobile-party-details">
+                <summary>Song Lyrics</summary>
+                <pre className="lyrics-preview">{celebrationSong.lyrics}</pre>
+              </details>
+            )}
+          </div>
+        )}
       </article>
 
       {encounterModalOpen && (
